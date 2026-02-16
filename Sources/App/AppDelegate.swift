@@ -9,9 +9,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Application Lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        setupWindow()
-        setupMainMenu()
-        showEmptyState()
+        if window == nil {
+            setupWindow()
+            setupMainMenu()
+        }
+        if tableViewController == nil && fileSession == nil {
+            showEmptyState()
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -19,6 +23,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func application(_ sender: NSApplication, openFile filename: String) -> Bool {
+        // This can be called before applicationDidFinishLaunching when
+        // the app is launched via Finder "Open With". Ensure window exists.
+        if window == nil {
+            setupWindow()
+            setupMainMenu()
+        }
         let url = URL(fileURLWithPath: filename)
         openFile(at: url)
         return true
