@@ -3,3 +3,18 @@ plans/
 tasks/
 prompt.md
 scripts/
+
+# Xcode
+*.xcodeproj/
+xcuserdata/
+DerivedData/
+build/
+*.xcworkspace/
+
+# DuckDB binary (too large for git, use Libraries/download-duckdb.sh)
+Libraries/libduckdb.dylib
+Libraries/libduckdb.a
+Libraries/duckdb.hpp
+
+# macOS
+.DS_Store

@@ -1,0 +1,420 @@
+## 2026-02-15 - US-001 - Bootstrap Xcode project with AppKit window
+- Created project directory structure: Sources/App/, Sources/Engine/, Sources/Model/, Sources/UI/, Sources/Bridging/, Libraries/, Resources/, Tests/
+- Created project.yml targeting macOS 14.0+ with Swift 5.10, bundle ID com.gridka.app
+- Created Sources/App/AppDelegate.swift with NSApplicationDelegate that creates main NSWindow (title "Gridka", 1200x800)
+- Created Sources/App/main.swift with NSApplication.shared setup
+- Created Resources/Assets.xcassets with empty AppIcon set
+- Created Tests/GridkaTests.swift placeholder for test target
+- Generated Gridka.xcodeproj with xcodegen
+- Build succeeds with zero warnings/errors
+- **Learnings for future iterations:**
+  - xcodegen is already installed at /opt/homebrew/bin/xcodegen
+  - project.yml uses GENERATE_INFOPLIST_FILE: YES so no manual Info.plist needed
+  - The test target uses BUNDLE_LOADER/TEST_HOST pattern for host app testing
+  - Empty source directories need at least one file for xcodegen to include them in targets
+  - The generated .xcodeproj should be gitignored since it's reproducible from project.yml
+----
+
+## 2026-02-15 - US-002 - Vendor DuckDB and configure bridging header
+- Downloaded DuckDB v1.2.1 macOS universal library from GitHub releases to Libraries/
+- DuckDB release provides libduckdb.dylib (dynamic library), not a static .a — project configured for dylib linking
+- Created Sources/Bridging/Gridka-Bridging-Header.h with `#include "duckdb.h"`
+- Updated project.yml: SWIFT_OBJC_BRIDGING_HEADER, HEADER_SEARCH_PATHS, LIBRARY_SEARCH_PATHS, OTHER_LDFLAGS (-lduckdb, -lc++)
+- Added LD_RUNPATH_SEARCH_PATHS for @executable_path/../Frameworks and $(PROJECT_DIR)/Libraries
+- Added postCompileScript to copy libduckdb.dylib into app bundle's Frameworks directory
+- Added smoke test in AppDelegate.swift: duckdb_open(nil, &db) + duckdb_close(&db) — verifies linking works
+- Created Libraries/download-duckdb.sh script for fetching DuckDB (dylib is too large for git, .gitignored)
+- Libraries/duckdb.h committed to git; libduckdb.dylib is .gitignored
+- Build succeeds, tests pass, no warnings
+- **Learnings for future iterations:**
+  - DuckDB macOS release only provides .dylib (not .a static lib) — must configure dylib embedding
+  - DuckDB C API types in Swift: `duckdb_database` maps to `UnsafeMutablePointer<_duckdb_database>?`, not `OpaquePointer?`
+  - postCompileScripts in project.yml need inputFiles/outputFiles to avoid "run every build" warnings
+  - The dylib install name is just `libduckdb.dylib` — rpath must include Frameworks dir
+  - DuckDB open returns `DuckDBSuccess` constant (not a raw Int)
+----
+
+## 2026-02-15 - US-003 - Implement GridkaError and DuckDBTypes
+- Created Sources/Engine/GridkaError.swift with enum GridkaError: LocalizedError containing cases: databaseInitFailed, connectionFailed, queryFailed(String), fileNotFound(String), loadFailed(String)
+- Created Sources/Bridging/DuckDBTypes.swift with:
+  - enum DuckDBColumnType: varchar, integer, bigint, double, float, boolean, date, timestamp, blob, unknown — mapped from duckdb_type C constants via static mapType(from:)
+  - enum DisplayType: text, integer, float, date, boolean, unknown
+  - enum DuckDBValue: string(String), integer(Int64), double(Double), boolean(Bool), date(String), null — conforms to Equatable and CustomStringConvertible
+- Regenerated Gridka.xcodeproj, build succeeds, tests pass
+- **Learnings for future iterations:**
+  - DuckDB C enum values (DUCKDB_TYPE_VARCHAR, etc.) are available directly in Swift via the bridging header — no need for raw values
+  - DuckDB has many integer subtypes (TINYINT, SMALLINT, UTINYINT, etc.) — map them all to the appropriate DuckDBColumnType
+  - DuckDB timestamps have multiple variants (TIMESTAMP, TIMESTAMP_S, TIMESTAMP_MS, TIMESTAMP_NS, TIMESTAMP_TZ) — all mapped to .timestamp
+  - HUGEINT and UHUGEINT are 128-bit integers — mapped to .bigint since Swift Int64 is used for display
+----
+
+## 2026-02-15 - US-004 - Implement DuckDBEngine core wrapper
+- Created Sources/Engine/DuckDBEngine.swift as a final class wrapping DuckDB C API
+- DuckDBEngine.init() opens in-memory database with duckdb_open, creates connection with duckdb_connect
+- Configures memory_limit to 50% of system RAM (via ProcessInfo.processInfo.physicalMemory)
+- Configures temp_directory to ~/Library/Caches/com.gridka.app/duckdb-temp/
+- Configures threads to active processor count
+- func execute(_ sql: String) throws -> DuckDBResult wraps duckdb_query with error handling
+- Created DuckDBResult as a final class wrapping duckdb_result with: rowCount, columnCount, columnName(at:), columnType(at:), value(row:col:) -> DuckDBValue
+- DuckDBResult.value() extracts typed values based on column type: boolean, integer types, float, double/decimal, date, timestamp, and varchar fallback
+- duckdb_value_varchar results are properly freed with duckdb_free
+- DuckDBResult.deinit calls duckdb_destroy_result; DuckDBEngine.deinit calls duckdb_disconnect + duckdb_close
+- GRIDKA_LOG_SQL=1 environment variable support via os.log Logger
+- @discardableResult on execute() for SET commands that don't need result inspection
+- Build succeeds, tests pass
+- **Learnings for future iterations:**
+  - duckdb_result is a value type in C but contains internal pointers — must use `var` and pass with `&` for DuckDB API calls
+  - DuckDBResult stores rowCount/columnCount eagerly in init since the result pointer is needed
+  - duckdb_value_varchar returns a malloc'd char* that must be freed with duckdb_free (not Swift's dealloc)
+  - The deprecated duckdb_value_* functions (boolean, int64, float, double, varchar, is_null) are still the simplest way to extract values from duckdb_result — the newer chunk-based API is more complex but faster
+  - os.log Logger (import os.log) is the modern replacement for NSLog/os_log for structured logging
+  - ProcessInfo.processInfo.activeProcessorCount gives logical cores (not physical), suitable for DuckDB thread config
+----
+
+## 2026-02-15 - US-005 - Implement model types: ViewState, ColumnDescriptor, ColumnFilter
+- Created Sources/Model/ColumnDescriptor.swift: struct with name, duckDBType, displayType, index — conforms to Equatable and Hashable
+- Created Sources/Model/ViewState.swift with:
+  - enum SortDirection: ascending, descending (Equatable, Hashable)
+  - struct SortColumn: column + direction (Equatable, Hashable) — used instead of tuple since tuples can't conform to Equatable
+  - struct ViewState: sortColumns, filters, searchTerm, visibleRange, totalFilteredRows (Equatable)
+- Created Sources/Model/ColumnFilter.swift with:
+  - enum FilterOperator: all 17 operator cases (contains, equals, startsWith, endsWith, regex, isEmpty, isNotEmpty, greaterThan, lessThan, greaterOrEqual, lessOrEqual, between, isNull, isNotNull, isTrue, isFalse) — Equatable, Hashable
+  - enum FilterValue: string, number, dateRange, boolean, none — Equatable, Hashable
+  - struct ColumnFilter: column, operator, value — Equatable, Hashable
+- Added Hashable conformance to DuckDBColumnType and DisplayType in DuckDBTypes.swift (needed for ColumnDescriptor Hashable)
+- Regenerated Gridka.xcodeproj, build succeeds, tests pass
+- **Learnings for future iterations:**
+  - PRD specifies sortColumns as `[(column: String, direction: SortDirection)]` tuple array, but Swift tuples can't conform to Equatable/Hashable — use a named SortColumn struct instead
+  - `operator` is a Swift keyword — must use backticks when used as property name: `let \`operator\`: FilterOperator`
+  - Simple enums without associated values auto-synthesize Hashable, but enums with associated values need all associated types to be Hashable
+  - ViewState uses `var` properties since it's a value type that gets mutated to produce new states
+----
+
+## 2026-02-15 - US-006 - Implement QueryCoordinator with unit tests
+- Created Sources/Engine/QueryCoordinator.swift as a final class with no stored state
+- func buildQuery(for:columns:range:) generates SELECT * FROM data with optional WHERE, ORDER BY, LIMIT/OFFSET
+- func buildCountQuery(for:columns:) generates SELECT COUNT(*) FROM data with optional WHERE (no ORDER BY)
+- WHERE clause: filters combined with AND, global search ORs across all columns cast to TEXT with ILIKE
+- ORDER BY: respects sortColumns order, each with ASC/DESC and NULLS LAST
+- LIMIT/OFFSET: derived from range parameter
+- Static helpers: quote() double-quotes identifiers, escape() handles single quotes, backslashes, percent, and underscore for ILIKE
+- All filter operators implemented: contains, equals (string+numeric), startsWith, endsWith, regex, isEmpty, isNotEmpty, greaterThan, lessThan, greaterOrEqual, lessOrEqual, between, isNull, isNotNull, isTrue, isFalse
+- Global search excludes _gridka_rowid column
+- Numeric formatting: whole numbers rendered as integers (25 not 25.0), decimals preserved
+- Created Tests/QueryCoordinatorTests.swift with 38 test cases covering: bare select, offset, count query, single filter, multiple filters AND, global search, search excluding _gridka_rowid, empty search term, single sort asc/desc, multi-column sort, combined filter+sort+search, all 17 filter operator types, quote/escape helpers, SQL injection prevention, numeric formatting
+- Fixed project.yml: added HEADER_SEARCH_PATHS to GridkaTests target (test target couldn't find duckdb.h from bridging header)
+- All 39 tests pass (38 QueryCoordinator + 1 placeholder), build succeeds
+- **Learnings for future iterations:**
+  - The GridkaTests target needs HEADER_SEARCH_PATHS pointing to Libraries/ because the bridging header includes duckdb.h — without this the test target fails to compile
+  - QueryCoordinator is purely stateless — it takes ViewState and columns as parameters and returns SQL strings. No DuckDB dependency needed for testing.
+  - ILIKE patterns need ESCAPE '\\' clause when using escape() helper that escapes %, _, and \ characters
+  - DuckDB uses ~ for regex matching (POSIX regex operator)
+  - between operator uses FilterValue.dateRange(low, high) for both date ranges and numeric ranges
+  - Numeric values from FilterValue.number(Double) should be formatted as integers when they have no fractional part to produce cleaner SQL
+----
+
+## 2026-02-15 - US-007 - Implement RowCache with unit tests
+- Created Sources/Engine/RowCache.swift as a struct (value type) implementing LRU page cache
+- Page size constant: 500 rows, max cached pages: 20 (10,000 rows max in memory)
+- Inner struct Page: startRow, data as [[DuckDBValue]], columnNames as [String], lastAccessed as Date
+- func value(forRow:columnName:) returns DuckDBValue? — nil on cache miss
+- mutating func touchPage(forRow:) — updates lastAccessed for LRU tracking on access
+- mutating func insertPage(_:) — adds page, triggers LRU eviction if over maxCachedPages limit
+- mutating func invalidateAll() — clears all cached pages (for filter/sort changes)
+- func pageIndex(forRow:) and func pageRange(forPageIndex:) for page math
+- LRU eviction: evicts page with oldest lastAccessed timestamp
+- Created Tests/RowCacheTests.swift with 12 test cases covering: cache miss returns nil, wrong column returns nil, insert then hit returns value, different column types, multiple rows, page index math (row 0→page 0, row 499→page 0, row 500→page 1), page range calculation, eviction at 21 pages evicts oldest, invalidateAll clears everything, out-of-bounds row returns nil, constant verification
+- All 51 tests pass (12 RowCache + 38 QueryCoordinator + 1 placeholder), build succeeds
+- **Learnings for future iterations:**
+  - RowCache is a value type (struct) — mutating methods produce new state, consistent with the ViewState immutability pattern
+  - Page lookup by columnName uses firstIndex(of:) on columnNames array — column order in Page must match data column order
+  - LRU eviction uses Dictionary.min(by:) to find the oldest lastAccessed page — O(n) but with max 20 pages this is fine
+  - touchPage(forRow:) is separate from value(forRow:columnName:) because value() is non-mutating for ergonomic read-only access
+  - Pages are keyed by page index (row / pageSize) in a [Int: Page] dictionary for O(1) lookup
+----
+
+## 2026-02-15 - US-010 - Implement file opening flow with drag-drop and menu
+- Rewrote Sources/App/AppDelegate.swift with full file opening flow:
+  - File > Open menu item (⌘O) opens NSOpenPanel filtered to csv, tsv, txt file types using UTType (.commaSeparatedText, .tabSeparatedText, .plainText)
+  - Empty state view with centered "Drop a CSV file or ⌘O to open" label (system font, secondary label color)
+  - File opening creates FileSession, calls loadPreview, configures TableViewController, then starts background loadFull
+  - Window title updates to show filename ("Gridka — filename.csv")
+  - NSApplication openFile delegate method for Finder double-click support
+  - Error handling via NSAlert sheet on the window
+  - Main menu setup: App menu (About, Quit), File menu (Open, Close), Edit menu (Copy, Select All), Window menu (Minimize, Zoom)
+- Created Sources/UI/DragDropView.swift:
+  - NSView subclass that registers for .fileURL dragging type
+  - Validates file extensions (csv, tsv, txt, dsv) before accepting drop
+  - Uses readObjects(forClasses:options:) with urlReadingFileURLsOnly for safe URL extraction
+  - onFileDrop closure callback to AppDelegate
+- Window contentView is replaced with DragDropView to accept drops anywhere in the window
+- Empty state ↔ table view transition: removes old view, adds new view with Auto Layout constraints
+- Build succeeds, all 51 tests pass
+- **Learnings for future iterations:**
+  - NSOpenPanel.allowedContentTypes uses UTType from UniformTypeIdentifiers — .commaSeparatedText and .tabSeparatedText are the correct UTTypes for CSV/TSV
+  - DragDropView must be the window's contentView (not a subview) to receive drops across the entire window area
+  - registerForDraggedTypes([.fileURL]) is the modern way to accept file drops — NSDragOperation.copy is returned for valid files
+  - readObjects(forClasses:options:) with [.urlReadingFileURLsOnly: true] filters out non-file URLs safely
+  - The main menu must be set programmatically since there are no storyboards — NSApp.mainMenu = menu
+  - application(_:openFile:) on NSApplicationDelegate handles files opened from Finder double-click
+  - TableViewController is held as a strong reference on AppDelegate to prevent deallocation (its view is just a subview)
+----
+
+## 2026-02-15 - US-008 - Implement FileSession with serial query queue
+- Created Sources/Model/FileSession.swift as a final class coordinating all DuckDB queries
+- Properties: filePath (URL), engine (DuckDBEngine), tableName, columns, viewState, rowCache, isFullyLoaded
+- Private serial DispatchQueue named 'com.gridka.query-queue' for all DuckDB calls
+- func loadPreview(completion:) runs SELECT * FROM read_csv_auto(...) LIMIT 1000 on query queue, extracts column metadata, creates initial RowCache page, dispatches result to main
+- func loadFull(progress:completion:) runs CREATE TABLE data AS SELECT row_number() OVER () AS _gridka_rowid, * FROM read_csv_auto(...) on query queue with ignore_errors=true, then COUNT(*), re-extracts columns from materialized table, dispatches to main
+- func fetchPage(index:completion:) uses QueryCoordinator to build SQL from current viewState, executes on query queue, returns RowCache.Page
+- func updateViewState(_:) invalidates rowCache when filters/sort/search change, triggers count re-query via requeryCount()
+- All DuckDB execute calls happen exclusively on the serial query queue
+- All completion handlers dispatch back to DispatchQueue.main
+- File existence check in init() throws GridkaError.fileNotFound for missing files
+- Private helpers: extractColumns, extractPage, extractRowData, mapDisplayType — reuse DuckDBResult to build model types
+- Regenerated Gridka.xcodeproj, build succeeds, all 51 tests pass
+- **Learnings for future iterations:**
+  - FileSession owns the DuckDBEngine instance — it's the only object that calls engine.execute()
+  - RowCache is a struct (value type) stored as var on FileSession — mutating methods work because FileSession is a class
+  - loadFull re-extracts columns via SELECT * FROM data LIMIT 0 after materialization because the table now includes _gridka_rowid
+  - File path escaping for SQL: single quotes in paths must be doubled for DuckDB SQL strings
+  - Progress callback during loadFull is approximate (0.0 → 0.8 after CREATE TABLE, 0.8 → 1.0 after COUNT) since DuckDB doesn't provide granular progress for CREATE TABLE AS
+  - updateViewState compares filters/sort/search to detect if cache invalidation is needed — visible range changes alone don't invalidate
+  - The serial query queue prevents concurrent DuckDB access since DuckDB connections are not thread-safe
+----
+
+## 2026-02-15 - US-009 - Implement TableViewController with NSTableView data source
+- Created Sources/UI/TableViewController.swift as a final class extending NSViewController
+- NSScrollView wrapping NSTableView in view-based mode with vertical and horizontal scrollers
+- NSTableViewDataSource: numberOfRows returns fileSession.viewState.totalFilteredRows
+- NSTableViewDelegate: tableView(_:viewFor:row:) returns NSTextField-based cells with cell recycling via makeView(withIdentifier:owner:)
+- Cache miss handling: shows "..." placeholder in gray, triggers async page fetch via FileSession.fetchPage, reloads affected rows on completion
+- Deduplication of page fetch requests via fetchingPages Set to prevent multiple concurrent fetches of the same page
+- func configureColumns(_:) dynamically creates NSTableColumn per ColumnDescriptor, skipping _gridka_rowid
+- Column headers show name + type indicator: "age (int)", "name (text)", etc.
+- Cell text formatting: integers with grouping separator (NumberFormatter), floats with 2 decimal places, dates as ISO strings, booleans as "true"/"false", nulls as italic gray "NULL"
+- Numeric columns (integer, float) are right-aligned; text/date/boolean are left-aligned
+- Monospaced digit font (NSFont.monospacedDigitSystemFont) for tabular number alignment
+- Regenerated Gridka.xcodeproj, build succeeds, all 51 tests pass
+- **Learnings for future iterations:**
+  - NSTableView property is `usesAlternatingRowBackgroundColors` (not `usesAlternatingRowBackgrounds`) — the latter doesn't exist and causes compile error
+  - NSFont italic helper: use `fontDescriptor.withSymbolicTraits(.italic)` then `NSFont(descriptor:size:)` — returns optional since not all fonts have italic variant
+  - Cell recycling in view-based NSTableView: use `makeView(withIdentifier:owner:)` which returns NSView? — cast to NSTextField for reuse
+  - The fetchingPages Set prevents duplicate page requests when NSTableView calls viewFor delegate rapidly for visible rows in the same uncached page
+  - NSTableColumn identifier uses the column name string — matches RowCache columnName for direct lookup
+  - columnAutoresizingStyle = .noColumnAutoresizing prevents auto-shrinking columns when window resizes
+----
+
+## 2026-02-15 - US-011 - Implement progressive loading and status bar
+- Created Sources/UI/StatusBarView.swift: 22pt horizontal bar at the bottom of the window
+  - Shows total rows ("X rows" or "showing X of Y rows" when filtered), file size, load time
+  - During background load shows "Loading… X%" progress text
+  - Uses NSFont.monospacedDigitSystemFont for number alignment
+  - Uses ByteCountFormatter for human-readable file sizes
+  - NSBox separator at the top for visual separation from the table
+- Modified Sources/UI/TableViewController.swift:
+  - Added StatusBarView as a subview pinned to the bottom of the container
+  - ScrollView bottom constraint now anchors to statusBar.topAnchor instead of container bottom
+- Modified Sources/App/AppDelegate.swift:
+  - On file open: reads file size via FileManager attributes, updates status bar
+  - Tracks load start time with CFAbsoluteTimeGetCurrent()
+  - Preview load immediately shows row count in status bar
+  - Full background load updates progress via progress callback
+  - On full load completion: updates load time, row count, and clears progress
+  - Seamless swap: after full load, only reassigns fileSession (triggers reloadData) without reconfiguring columns — preserves scroll position
+- Regenerated Gridka.xcodeproj, build succeeds, all 51 tests pass
+- **Learnings for future iterations:**
+  - ByteCountFormatter with .file countStyle is the standard way to format file sizes on macOS
+  - CFAbsoluteTimeGetCurrent() is a lightweight wall-clock timer suitable for measuring load times
+  - FileManager.attributesOfItem(atPath:)[.size] returns file size as UInt64 — cast to Int64 for ByteCountFormatter
+  - When swapping from preview to full table, don't call configureColumns again — the columns are the same (just with _gridka_rowid added which is hidden). Just reassigning fileSession triggers reloadData which picks up the new totalFilteredRows without resetting scroll position.
+  - StatusBarView height constraint of 22pt is standard for macOS status bars
+  - NSBox with .separator boxType provides the standard system divider line
+----
+
+## 2026-02-15 - US-012 - Implement column sorting
+- Implemented column header click sorting in TableViewController via `tableView(_:didClick:)` delegate method
+- Click cycle: first click → ascending, second click → descending, third click → removes sort
+- Shift+click adds secondary/tertiary sort keys (multi-column sort)
+- Sort indicators in column headers: ▲ for ascending, ▼ for descending; multi-sort shows numbered indicators (1▲, 2▼)
+- Added `onSortChanged` callback on TableViewController for AppDelegate to wire up the sorting flow
+- Added `updateSortIndicators()` method that updates column header titles to reflect current sort state
+- AppDelegate `handleSortChanged()` updates ViewState, invalidates cache, re-fetches visible page, reloads table
+- StatusBarView gains `showQueryTime()` method that briefly shows query execution time (auto-clears after 3 seconds)
+- Sorting is disabled during preview mode (before full load completes) via `isFullyLoaded` guard
+- Files changed: Sources/UI/TableViewController.swift, Sources/UI/StatusBarView.swift, Sources/App/AppDelegate.swift
+- Build succeeds, all 51 tests pass
+- **Learnings for future iterations:**
+  - NSTableView `tableView(_:didClick:)` delegate fires when user clicks column headers — this is the hook for sort interaction
+  - NSEvent.modifierFlags is a static property that gives current modifier key state — use `.contains(.shift)` to detect shift+click
+  - Sort indicators are rendered as Unicode arrows (▲ U+25B2, ▼ U+25BC) directly in the column title string — simpler than using NSTableColumn's built-in sortIndicatorImage
+  - Multi-sort numbering (1▲, 2▼) uses array index + 1 from ViewState.sortColumns
+  - The `onSortChanged` closure pattern keeps TableViewController decoupled from AppDelegate — TVC handles UI, AppDelegate handles data flow
+  - FileSession.updateViewState() already handles cache invalidation when sortColumns change — just need to trigger a page re-fetch after
+  - `tableView.rows(in: tableView.visibleRect).location` gives the first visible row index for determining which page to re-fetch after sort
+----
+
+## 2026-02-15 - US-013 - Implement column filter SQL generation for all operator types
+- Enhanced QueryCoordinator comparison operators (greaterThan, lessThan, greaterOrEqual, lessOrEqual) to accept both .number and .string filter values — enabling date column filtering with string date values (e.g., "2023-01-01")
+- Numeric between already worked via dateRange(low, high) pattern — confirmed and tested
+- Added 13 new test cases covering:
+  - Date comparison operators: greaterThan, lessThan, greaterOrEqual, lessOrEqual with string values
+  - Date between and numeric between via dateRange
+  - SQL injection prevention for date strings, between values, equals strings, and regex patterns
+  - Multiple filters (3-way AND), filter+search combination
+  - Invalid filter value gracefully ignored (no WHERE clause generated)
+- Files changed: Sources/Engine/QueryCoordinator.swift, Tests/QueryCoordinatorTests.swift, plans/prd.json
+- All 64 tests pass (51 original + 13 new), build succeeds
+- **Learnings for future iterations:**
+  - The comparison operators (greaterThan, lessThan, etc.) in US-006 originally only accepted .number values — US-013 extends them to also accept .string values for date comparisons
+  - The between operator uses FilterValue.dateRange(low, high) for both date ranges AND numeric ranges — the PRD confirms this design choice
+  - All string values interpolated into SQL use .replacingOccurrences(of: "'", with: "''") for single-quote escaping — this is applied at each call site rather than through the escape() helper (which is for ILIKE patterns with %, _, \\ escaping)
+  - Invalid filter values (e.g., boolean value for greaterThan operator) cause buildFilterCondition to return nil, which silently drops the filter — the query still executes, just without that filter condition
+----
+
+## 2026-02-15 - US-014 - Implement filter bar UI with column header menus
+- Created Sources/UI/FilterBarView.swift: horizontal bar showing active filters as removable chip views
+  - FilterBarView manages a stack of FilterChipView instances, each with column name, operator, value label, and an X close button
+  - Auto-hides when no filters are active (height constraint transitions between 0 and 30pt)
+  - Chips use accent-colored rounded rect backgrounds with layer-based rendering
+  - onFilterRemoved callback triggers filter removal flow back through AppDelegate
+- Created Sources/UI/FilterPopoverViewController.swift: popover for creating column filters
+  - Adapts operator dropdown based on column DisplayType: text columns show text operators (contains, equals, startsWith, etc.), numeric/date columns show comparison operators, boolean columns show isTrue/isFalse
+  - Value field hidden for operators that don't need a value (isNull, isEmpty, isTrue, etc.)
+  - "Between" operator shows a second value field with "and" label
+  - Numeric values parsed as Double for .number FilterValue, strings used for date columns
+  - Apply button (Enter key) builds ColumnFilter and triggers onApply callback
+- Added right-click context menu on column headers in TableViewController
+  - NSMenu with NSMenuDelegate to dynamically populate based on right-clicked column
+  - Mouse screen coordinates converted to header view local coordinates to determine clicked column
+  - "Filter 'columnName'..." menu item stores column name as representedObject (NSString, not struct)
+  - Clicking menu item shows FilterPopoverViewController positioned relative to header view
+- Wired filter bar into TableViewController layout
+  - FilterBarView sits between container top and scrollView top
+  - scrollView.topAnchor now anchors to filterBar.bottomAnchor instead of container top
+  - onFiltersChanged callback pattern matches existing onSortChanged pattern
+- Wired filter handling into AppDelegate
+  - handleFiltersChanged updates ViewState.filters, invalidates cache via updateViewState, re-fetches page 0
+  - Status bar shows "showing X of Y rows" using new FileSession.totalRows property for unfiltered total
+  - Added FileSession.totalRows property to track unfiltered row count (set during loadFull)
+- Files changed: Sources/UI/FilterBarView.swift (new), Sources/UI/FilterPopoverViewController.swift (new), Sources/UI/TableViewController.swift, Sources/App/AppDelegate.swift, Sources/Model/FileSession.swift, plans/prd.json
+- Build succeeds, all 64 tests pass
+- **Learnings for future iterations:**
+  - ColumnDescriptor is a struct and can't be used as NSMenuItem.representedObject directly — store the column name as NSString instead and look up the descriptor from FileSession.columns
+  - NSTableHeaderView.column(at:) takes a point in the header view's local coordinate space — must convert from screen coordinates via window.convertPoint(fromScreen:) then headerView.convert(_:from:nil)
+  - NSPopover.behavior = .transient auto-dismisses on click outside — no manual dismiss handling needed
+  - The filter bar height is managed via a stored NSLayoutConstraint — toggling isHidden + updating constant is the simplest approach
+  - FilterPopoverViewController adjusts its preferredContentSize dynamically based on which fields are visible (between needs more height, no-value operators need less)
+  - The filter removal flow: FilterChipView.closeClicked → FilterBarView.onFilterRemoved → TableViewController.removeFilter → onFiltersChanged → AppDelegate.handleFiltersChanged — this keeps each layer decoupled
+  - FileSession.totalRows stores the unfiltered count separately from viewState.totalFilteredRows, which changes when filters are applied
+----
+
+## 2026-02-15 - US-015 - Implement global search
+- Created Sources/UI/SearchBarView.swift: horizontal bar with NSTextField search field, match count label, Previous/Next chevron buttons, and close button
+  - SearchBarView manages 300ms debounce via DispatchWorkItem — cancels and re-schedules on each keystroke
+  - Escape key dismisses search bar via NSTextFieldDelegate's `control(_:textView:doCommandBy:)` intercepting `cancelOperation:`
+  - show() focuses the search field via `window?.makeFirstResponder(searchField)`
+  - dismiss() clears the field, resets match count, hides the bar, and fires onSearchChanged("") to clear the search
+  - updateMatchCount() displays "X rows match" or "No matches" in the match count label
+- Modified Sources/UI/TableViewController.swift:
+  - Added searchBar property and onSearchChanged callback
+  - SearchBarView inserted between filterBar and scrollView in layout constraints
+  - toggleSearchBar() method for ⌘F — shows or dismisses the search bar
+  - navigateMatch(direction:) scrolls the table by one visible page up/down for Previous/Next
+  - onDismiss callback returns focus to the tableView
+- Modified Sources/App/AppDelegate.swift:
+  - Added Find…(⌘F), Find Next (⌘G), Find Previous (⇧⌘G) menu items to Edit menu
+  - performFind/performFindNext/performFindPrevious action methods route to search bar
+  - handleSearchChanged() updates ViewState.searchTerm, invalidates cache, re-fetches page 0, updates status bar and match count
+  - onSearchChanged callback wired in showTableView()
+  - Search only enabled when file is fully loaded (isFullyLoaded guard)
+- Files changed: Sources/UI/SearchBarView.swift (new), Sources/UI/TableViewController.swift, Sources/App/AppDelegate.swift, plans/prd.json
+- Build succeeds, all 64 tests pass
+- **Learnings for future iterations:**
+  - NSViewController doesn't have a `window` property — use `view.window` instead (caused initial compile error)
+  - DispatchWorkItem-based debouncing: cancel previous work item, create new one, schedule with asyncAfter — simple and effective pattern
+  - NSTextFieldDelegate's `control(_:textView:doCommandBy:)` returns true to indicate the command was handled — returning true for `cancelOperation:` prevents the Escape key from propagating
+  - NSMenuItem keyEquivalentModifierMask defaults to .command — for ⇧⌘G, explicitly set to [.command, .shift]
+  - The search bar layout slots between filterBar.bottomAnchor and scrollView.topAnchor — when hidden (height=0), the space collapses seamlessly
+  - Search flow mirrors filter flow: update ViewState → cache invalidation → fetchPage(0) → reload visible rows → update status bar counts
+  - Match count uses viewState.totalFilteredRows after requeryCount completes — same async pattern as filters with 0.1s delay for count query
+----
+
+## 2026-02-15 - US-016 - Implement column management: resize, reorder, hide/show, auto-fit
+- Column resize by dragging header borders already enabled (allowsColumnResizing = true)
+- Column reorder by dragging headers already enabled (allowsColumnReordering = true)
+- Added hiddenColumns (Set<String>) and allColumnDescriptors ([ColumnDescriptor]) tracking to TableViewController
+- configureColumns() now stores all descriptors and skips hidden columns when building NSTableColumns
+- Right-click column header context menu extended with:
+  - "Hide Column" option (disabled when only 1 column visible to prevent hiding all columns)
+  - "Show Columns >" submenu listing all hidden columns with type labels, only shown when hidden columns exist
+- hideColumn() removes the NSTableColumn from the table view and adds to hiddenColumns set
+- showColumn() re-creates the NSTableColumn and inserts it at the correct position based on original column order
+- Created AutoFitTableHeaderView: custom NSTableHeaderView subclass that detects double-click on column border dividers
+  - columnBorderIndex(at:) uses 4pt threshold to detect clicks near column right edges
+  - Triggers autoFitColumn(at:) which scans visible rows for max content width via NSAttributedString.size()
+  - Falls back to header title width as minimum, applies 16pt padding, respects min/max column constraints
+- Column management state (hiddenColumns set) persists during the session — survives sort/filter/search changes
+- Files changed: Sources/UI/TableViewController.swift, plans/prd.json
+- Build succeeds, all 64 tests pass
+- **Learnings for future iterations:**
+  - NSTableView natively supports column resize and reorder — just set allowsColumnResizing and allowsColumnReordering
+  - For hide/show, maintaining a Set<String> of hidden column names is simpler than tracking NSTableColumn objects (which get destroyed on remove)
+  - When restoring a hidden column, need to calculate the correct insertion position by comparing against allColumnDescriptors order — addTableColumn always appends, then moveColumn repositions
+  - AutoFitTableHeaderView subclasses NSTableHeaderView to intercept double-clicks — checking event.clickCount == 2 in mouseDown and computing column border proximity from cumulative column widths + intercell spacing
+  - NSAttributedString.size() returns the bounding rect size for rendered text — useful for measuring column content width without creating actual views
+  - The "Show Columns" submenu uses allColumnDescriptors filtered by hiddenColumns to preserve original column order in the menu
+----
+
+## 2026-02-15 - US-017 - Implement data inspection: detail pane and copy operations
+- Created Sources/UI/DetailPaneView.swift: shows full content of selected cell with column metadata
+  - Displays column name, data type, character count, and full value text
+  - Uses monospace font for long text, URLs, and JSON-like content
+  - Scrollable NSTextView for large values
+  - Empty state prompt ("Click a cell to inspect") when no cell is selected
+- Modified Sources/UI/TableViewController.swift:
+  - Added NSSplitView layout: top = table scroll view, bottom = detail pane (120pt initial height)
+  - Added cell selection tracking: selectedRow and selectedColumnName properties
+  - Click on a cell (via tableView.action) updates the detail pane with full value
+  - Right-click context menu on table cells: Copy Cell, Copy Row, Copy with Headers
+  - Cell context menu uses NSMenu.identifier to differentiate from column header context menu
+  - Copy Cell (⌘C): copies selected cell value to clipboard
+  - Copy Row (⇧⌘C): copies all values in selected row as tab-separated text
+  - Copy Column (⌥⌘C): copies all visible values in selected column as newline-separated text
+  - Copy with Headers: prepends column name(s) as first line to row copy
+  - toggleDetailPane() method hides/shows the detail pane via splitView arrangedSubviews
+- Modified Sources/App/AppDelegate.swift:
+  - Replaced generic "Copy" menu item with specific Copy Cell (⌘C), Copy Row (⇧⌘C), Copy Column (⌥⌘C) items
+  - Added View menu with Toggle Detail Pane (⇧⌘D) item
+  - Added action methods routing to TableViewController copy/toggle methods
+- Build succeeds, all 64 tests pass
+- **Learnings for future iterations:**
+  - NSSplitView with addArrangedSubview is the modern way to create split views — no need for delegate-based configuration
+  - splitView.setPosition(_:ofDividerAt:) must be called after layout is complete (use DispatchQueue.main.async) to work correctly
+  - setHoldingPriority(.defaultHigh) on the detail pane keeps it at a fixed size when the window resizes, while the table resizes
+  - NSTableView.action + target fires on single row click — the clicked column index is available via tableView.clickedColumn
+  - NSMenu.identifier distinguishes between multiple menus using the same NSMenuDelegate (header menu vs cell context menu)
+  - NSSplitView arrangedSubviews need wrapper container NSViews since the split view manages their frames directly
+  - Tab-separated format for Copy Row enables direct paste into spreadsheets (Excel, Numbers, Google Sheets)
+  - NSPasteboard.general.clearContents() must be called before setString() — otherwise the paste may contain stale data
+----
+
+## 2026-02-15 - US-018 - Implement scroll pre-fetching and performance optimizations
+- Added scroll direction detection via NSView.boundsDidChangeNotification on scrollView.contentView
+- Pre-fetches 2 pages ahead in the detected scroll direction (up or down)
+- Added RowCache.hasPage(_:) method for efficient cache hit checking during pre-fetch
+- Optimized FileSession.updateViewState to only re-query count when filters/search change (not on sort-only changes, since sort doesn't affect row count)
+- Count query result is effectively cached — only re-queried when filters or search term change
+- Column type information was already cached once at load time (no changes needed)
+- GRIDKA_LOG_SQL=1 environment variable support was already implemented in DuckDBEngine (logs all SQL via os_log Logger)
+- Files changed: Sources/UI/TableViewController.swift, Sources/Engine/RowCache.swift, Sources/Model/FileSession.swift, plans/prd.json
+- Build succeeds, all 64 tests pass
+- **Learnings for future iterations:**
+  - scrollView.contentView.postsBoundsChangedNotifications must be set to true before observing NSView.boundsDidChangeNotification — otherwise no notifications are posted
+  - Scroll direction detection compares current first visible row to the last known first visible row — simple and reliable
+  - Pre-fetch uses the existing requestPageFetch(forRow:) which already deduplicates via fetchingPages Set, so prefetchPage just needs to check cache presence (hasPage) and fetching state
+  - RowCache.hasPage(_:) is O(1) dictionary lookup — much cheaper than trying to look up a value with a dummy column name
+  - FileSession.updateViewState previously called requeryCount on any state change including sort — but sorting doesn't change row count, only filters and search do. Splitting the check avoids unnecessary COUNT(*) queries on sort
+  - The serial query queue naturally prevents duplicate page fetches from causing issues — if the same page is requested while an existing fetch is in-flight, the fetchingPages Set blocks it
+  - NotificationCenter observer is removed in deinit to prevent dangling observers after TableViewController is deallocated
+----
