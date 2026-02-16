@@ -156,7 +156,7 @@ final class SearchBarView: NSView {
         }
         isHidden = false
         currentHeight = 32
-        superview?.needsLayout = true
+        (superview as? GridkaContainerView)?.layoutChildren()
         window?.makeFirstResponder(searchField)
     }
 
@@ -169,7 +169,7 @@ final class SearchBarView: NSView {
         matchRowCount = 0
         currentHeight = 0
         isHidden = true
-        superview?.needsLayout = true
+        (superview as? GridkaContainerView)?.layoutChildren()
         onSearchChanged?("")
     }
 

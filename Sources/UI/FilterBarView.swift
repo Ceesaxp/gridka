@@ -73,7 +73,7 @@ final class FilterBarView: NSView {
         let shouldShow = !filters.isEmpty
         currentHeight = shouldShow ? 30 : 0
         isHidden = !shouldShow
-        superview?.needsLayout = true
+        (superview as? GridkaContainerView)?.layoutChildren()
     }
 
     private func rebuildChips() {

@@ -249,6 +249,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showTableView() {
         emptyStateView?.removeFromSuperview()
         emptyStateView = nil
+        tableViewController?.view.removeFromSuperview()
+        tableViewController = nil
 
         guard let contentView = window.contentView else { return }
 

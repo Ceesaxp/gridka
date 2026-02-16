@@ -149,15 +149,17 @@ final class TableViewController: NSViewController {
         splitView.setHoldingPriority(.defaultLow, forSubviewAt: 1)
         splitView.delegate = self
 
-        // Add children to container — GridkaContainerView handles layout
+        // Add children to container — GridkaContainerView handles layout.
+        // Order matters for z-ordering: bars are added last so they draw
+        // on top of the split view when they become visible.
         container.filterBar = filterBar
         container.searchBar = searchBar
         container.splitView = splitView
         container.statusBar = statusBar
-        container.addSubview(filterBar)
-        container.addSubview(searchBar)
         container.addSubview(splitView)
         container.addSubview(statusBar)
+        container.addSubview(filterBar)
+        container.addSubview(searchBar)
 
         self.view = container
 
@@ -974,7 +976,7 @@ final class GridkaContainerView: NSView {
         layoutChildren()
     }
 
-    private func layoutChildren() {
+    func layoutChildren() {
         guard let filterBar, let searchBar, let splitView, let statusBar else { return }
         let w = bounds.width
         let h = bounds.height
