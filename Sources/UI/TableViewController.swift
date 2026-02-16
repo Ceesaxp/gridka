@@ -143,10 +143,11 @@ final class TableViewController: NSViewController {
         splitView.isVertical = false
         splitView.dividerStyle = .thin
 
-        splitView.addArrangedSubview(scrollView)
-        splitView.addArrangedSubview(detailPane)
-        splitView.setHoldingPriority(.defaultHigh, forSubviewAt: 0)
-        splitView.setHoldingPriority(.defaultLow, forSubviewAt: 1)
+        splitView.addSubview(scrollView)
+        splitView.addSubview(detailPane)
+        splitView.adjustSubviews()
+        splitView.setHoldingPriority(.defaultLow, forSubviewAt: 0)
+        splitView.setHoldingPriority(.defaultHigh, forSubviewAt: 1)
         splitView.delegate = self
 
         // Add children to container — GridkaContainerView handles layout.
@@ -179,7 +180,13 @@ final class TableViewController: NSViewController {
             let h = splitView.bounds.height
             if h > 120 {
                 needsInitialDividerPosition = false
-                splitView.setPosition(h - 120, ofDividerAt: 0)
+                // Dispatch async so that the position is set after all pending
+                // layout passes complete — avoids being undone by a subsequent
+                // resizeSubviews triggered by the container frame assignment.
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self else { return }
+                    self.splitView.setPosition(h - 120, ofDividerAt: 0)
+                }
             }
         }
     }
@@ -260,7 +267,7 @@ final class TableViewController: NSViewController {
         onFiltersChanged?(filters)
     }
 
-    private func showFilterPopover(for column: ColumnDescriptor, relativeTo view: NSView) {
+    private func showFilterPopover(for column: ColumnDescriptor, relativeTo positioningRect: NSRect, of positioningView: NSView) {
         let popoverVC = FilterPopoverViewController(column: column)
         popoverVC.onApply = { [weak self] newFilter in
             self?.addFilter(newFilter)
@@ -269,7 +276,8 @@ final class TableViewController: NSViewController {
         let popover = NSPopover()
         popover.contentViewController = popoverVC
         popover.behavior = .transient
-        popover.show(relativeTo: view.bounds, of: view, preferredEdge: .maxY)
+        popoverVC.popover = popover
+        popover.show(relativeTo: positioningRect, of: positioningView, preferredEdge: .maxY)
         activePopover = popover
     }
 
@@ -473,6 +481,48 @@ final class TableViewController: NSViewController {
         guard let text = selectedRowText(withHeaders: true) else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    @objc private func filterForValue(_ sender: NSMenuItem) {
+        guard let duckValue = sender.representedObject as? DuckDBValue else { return }
+        addQuickFilter(for: duckValue, negate: false)
+    }
+
+    @objc private func excludeValue(_ sender: NSMenuItem) {
+        guard let duckValue = sender.representedObject as? DuckDBValue else { return }
+        addQuickFilter(for: duckValue, negate: true)
+    }
+
+    private func addQuickFilter(for value: DuckDBValue, negate: Bool) {
+        let columnName = selectedColumnName
+        guard !columnName.isEmpty else { return }
+
+        let filterValue: FilterValue
+        let filterOp: FilterOperator
+
+        switch value {
+        case .null:
+            filterOp = .isNull
+            filterValue = .none
+        case .boolean(let b):
+            filterOp = b ? .isTrue : .isFalse
+            filterValue = .none
+        case .integer(let n):
+            filterOp = .equals
+            filterValue = .number(Double(n))
+        case .double(let n):
+            filterOp = .equals
+            filterValue = .number(n)
+        case .string(let s):
+            filterOp = .equals
+            filterValue = .string(s)
+        case .date(let s):
+            filterOp = .equals
+            filterValue = .string(s)
+        }
+
+        let filter = ColumnFilter(column: columnName, operator: filterOp, value: filterValue, negate: negate)
+        addFilter(filter)
     }
 
     // MARK: - Column Management (Hide/Show/Auto-fit)
@@ -869,6 +919,23 @@ extension TableViewController: NSMenuDelegate {
         let copyHeaders = NSMenuItem(title: "Copy with Headers", action: #selector(copyWithHeaders(_:)), keyEquivalent: "")
         copyHeaders.target = self
         menu.addItem(copyHeaders)
+
+        // Filter by value actions (only if we can read the cell value)
+        if let session = fileSession,
+           let value = session.rowCache.value(forRow: clickedRow, columnName: selectedColumnName) {
+
+            menu.addItem(NSMenuItem.separator())
+
+            let filterFor = NSMenuItem(title: "Filter for This Value", action: #selector(filterForValue(_:)), keyEquivalent: "")
+            filterFor.target = self
+            filterFor.representedObject = value
+            menu.addItem(filterFor)
+
+            let filterExclude = NSMenuItem(title: "Exclude This Value", action: #selector(excludeValue(_:)), keyEquivalent: "")
+            filterExclude.target = self
+            filterExclude.representedObject = value
+            menu.addItem(filterExclude)
+        }
     }
 
     @objc private func filterColumnClicked(_ sender: NSMenuItem) {
@@ -880,7 +947,8 @@ extension TableViewController: NSMenuDelegate {
         let columnIndex = tableView.column(withIdentifier: NSUserInterfaceItemIdentifier(columnName))
         guard columnIndex >= 0 else { return }
 
-        showFilterPopover(for: descriptor, relativeTo: headerView)
+        let headerRect = headerView.headerRect(ofColumn: columnIndex)
+        showFilterPopover(for: descriptor, relativeTo: headerRect, of: headerView)
     }
 
     @objc private func hideColumnClicked(_ sender: NSMenuItem) {
@@ -906,6 +974,12 @@ extension TableViewController: NSSplitViewDelegate {
     func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposedMaximumPosition: CGFloat, ofDividerAt dividerIndex: Int) -> CGFloat {
         // Detail pane (second pane) needs at least 60pt
         return splitView.bounds.height - 60
+    }
+
+    func splitView(_ splitView: NSSplitView, shouldAdjustSizeOfSubview view: NSView) -> Bool {
+        // Only the table (scrollView) should absorb size changes.
+        // The detail pane keeps its current height when the split view resizes.
+        return view !== detailPane
     }
 }
 
@@ -971,11 +1045,6 @@ final class GridkaContainerView: NSView {
         layoutChildren()
     }
 
-    override func layout() {
-        super.layout()
-        layoutChildren()
-    }
-
     func layoutChildren() {
         guard let filterBar, let searchBar, let splitView, let statusBar else { return }
         let w = bounds.width
@@ -990,7 +1059,14 @@ final class GridkaContainerView: NSView {
         searchBar.frame = NSRect(x: 0, y: y, width: w, height: searchH)
         y += searchH
         statusBar.frame = NSRect(x: 0, y: h - statusH, width: w, height: statusH)
-        splitView.frame = NSRect(x: 0, y: y, width: w, height: max(0, h - y - statusH))
+
+        // Only update splitView.frame when it actually changed.
+        // Setting the frame triggers NSSplitView.resizeSubviews() internally,
+        // which can redistribute subviews and undo divider positioning.
+        let newSplitFrame = NSRect(x: 0, y: y, width: w, height: max(0, h - y - statusH))
+        if splitView.frame != newSplitFrame {
+            splitView.frame = newSplitFrame
+        }
     }
 }
 

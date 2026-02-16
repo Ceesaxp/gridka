@@ -44,4 +44,5 @@ struct ColumnFilter: Equatable, Hashable {
     let column: String
     let `operator`: FilterOperator
     let value: FilterValue
+    var negate: Bool = false
 }

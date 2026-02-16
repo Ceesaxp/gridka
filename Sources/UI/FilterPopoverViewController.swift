@@ -7,9 +7,18 @@ final class FilterPopoverViewController: NSViewController {
     /// Called when the user clicks Apply with a valid filter.
     var onApply: ((ColumnFilter) -> Void)?
 
+    /// Weak reference to the enclosing popover for programmatic dismissal.
+    weak var popover: NSPopover?
+
     private let column: ColumnDescriptor
 
     private let operatorPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let negateCheckbox: NSButton = {
+        let btn = NSButton(checkboxWithTitle: "Not", target: nil, action: nil)
+        btn.toolTip = "Negate the condition"
+        btn.translatesAutoresizingMaskIntoConstraints = false
+        return btn
+    }()
     private let valueField = NSTextField()
     private let secondValueField = NSTextField() // For "between" operator
     private let secondValueLabel = NSTextField(labelWithString: "and")
@@ -69,6 +78,7 @@ final class FilterPopoverViewController: NSViewController {
         buttonStack.translatesAutoresizingMaskIntoConstraints = false
 
         container.addSubview(titleLabel)
+        container.addSubview(negateCheckbox)
         container.addSubview(operatorPopup)
         container.addSubview(valueField)
         container.addSubview(secondValueLabel)
@@ -82,7 +92,10 @@ final class FilterPopoverViewController: NSViewController {
 
             operatorPopup.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 10),
             operatorPopup.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
-            operatorPopup.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
+            operatorPopup.trailingAnchor.constraint(lessThanOrEqualTo: negateCheckbox.leadingAnchor, constant: -8),
+
+            negateCheckbox.centerYAnchor.constraint(equalTo: operatorPopup.centerYAnchor),
+            negateCheckbox.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
 
             valueField.topAnchor.constraint(equalTo: operatorPopup.bottomAnchor, constant: 8),
             valueField.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
@@ -163,11 +176,11 @@ final class FilterPopoverViewController: NSViewController {
     @objc private func applyClicked() {
         guard let filter = buildFilter() else { return }
         onApply?(filter)
-        dismiss(nil)
+        popover?.close()
     }
 
     @objc private func cancelClicked() {
-        dismiss(nil)
+        popover?.close()
     }
 
     // MARK: - Helpers
@@ -234,6 +247,6 @@ final class FilterPopoverViewController: NSViewController {
             }
         }
 
-        return ColumnFilter(column: column.name, operator: op, value: value)
+        return ColumnFilter(column: column.name, operator: op, value: value, negate: negateCheckbox.state == .on)
     }
 }

@@ -73,6 +73,14 @@ final class QueryCoordinator {
     }
 
     private func buildFilterCondition(_ filter: ColumnFilter) -> String? {
+        guard let condition = buildFilterSQL(filter) else { return nil }
+        if filter.negate {
+            return "NOT (\(condition))"
+        }
+        return condition
+    }
+
+    private func buildFilterSQL(_ filter: ColumnFilter) -> String? {
         let col = QueryCoordinator.quote(filter.column)
 
         switch filter.operator {

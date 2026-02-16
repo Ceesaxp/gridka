@@ -161,12 +161,13 @@ private final class FilterChipView: NSView {
         let col = filter.column
         let op = operatorLabel(filter.operator)
         let val = valueLabel(filter.value)
+        let not = filter.negate ? "NOT " : ""
 
         switch filter.operator {
         case .isEmpty, .isNotEmpty, .isNull, .isNotNull, .isTrue, .isFalse:
-            return "\(col) \(op)"
+            return "\(col) \(not)\(op)"
         default:
-            return "\(col) \(op) \(val)"
+            return "\(col) \(not)\(op) \(val)"
         }
     }
 
