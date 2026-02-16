@@ -55,9 +55,18 @@ final class TableViewController: NSViewController {
     /// Whether the detail pane is visible.
     private var isDetailPaneVisible = true
 
+    /// Currently highlighted cell view for visual feedback.
+    private weak var highlightedCellView: NSView?
+
+    /// Row number gutter view.
+    private var rowNumberView: RowNumberView?
+    /// Whether row numbers are visible.
+    private(set) var isRowNumbersVisible = false
+    private static let rowNumberGutterWidth: CGFloat = 50
+
     // MARK: - Number Formatters
 
-    private static let integerFormatter: NumberFormatter = {
+    private var integerFormatter: NumberFormatter = {
         let f = NumberFormatter()
         f.numberStyle = .decimal
         f.maximumFractionDigits = 0
@@ -65,12 +74,26 @@ final class TableViewController: NSViewController {
         return f
     }()
 
-    private static let floatFormatter: NumberFormatter = {
+    private var floatFormatter: NumberFormatter = {
         let f = NumberFormatter()
         f.numberStyle = .decimal
         f.minimumFractionDigits = 2
         f.maximumFractionDigits = 2
         f.usesGroupingSeparator = true
+        return f
+    }()
+
+    private var dateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    /// Input formatter to parse dates from DuckDB's ISO format.
+    private static let isoDateParser: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "en_US_POSIX")
         return f
     }()
 
@@ -172,6 +195,39 @@ final class TableViewController: NSViewController {
             name: NSView.boundsDidChangeNotification,
             object: scrollView.contentView
         )
+
+        // Observe settings changes to update formatters
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(settingsDidChange(_:)),
+            name: SettingsManager.settingsChangedNotification,
+            object: nil
+        )
+        updateFormattersFromSettings()
+    }
+
+    @objc private func settingsDidChange(_ notification: Notification) {
+        updateFormattersFromSettings()
+        reloadVisibleRows()
+    }
+
+    private func updateFormattersFromSettings() {
+        let settings = SettingsManager.shared
+
+        integerFormatter.usesGroupingSeparator = settings.useThousandsSeparator
+        floatFormatter.usesGroupingSeparator = settings.useThousandsSeparator
+
+        if settings.useDecimalComma {
+            let locale = Locale(identifier: "de_DE")
+            integerFormatter.locale = locale
+            floatFormatter.locale = locale
+        } else {
+            let locale = Locale(identifier: "en_US")
+            integerFormatter.locale = locale
+            floatFormatter.locale = locale
+        }
+
+        dateFormatter.dateFormat = settings.dateFormat.rawValue
     }
 
     override func viewDidLayout() {
@@ -242,12 +298,12 @@ final class TableViewController: NSViewController {
                 let sort = sortColumns[sortIndex]
                 let arrow = sort.direction == .ascending ? "\u{25B2}" : "\u{25BC}"
                 if isMultiSort {
-                    tableColumn.title = "\(descriptor.name) (\(typeStr)) \(sortIndex + 1)\(arrow)"
+                    tableColumn.title = "\(descriptor.name.uppercased()) (\(typeStr)) \(sortIndex + 1)\(arrow)"
                 } else {
-                    tableColumn.title = "\(descriptor.name) (\(typeStr)) \(arrow)"
+                    tableColumn.title = "\(descriptor.name.uppercased()) (\(typeStr)) \(arrow)"
                 }
             } else {
-                tableColumn.title = "\(descriptor.name) (\(typeStr))"
+                tableColumn.title = "\(descriptor.name.uppercased()) (\(typeStr))"
             }
             styleHeaderCell(tableColumn.headerCell, descriptor: descriptor)
         }
@@ -322,9 +378,52 @@ final class TableViewController: NSViewController {
         tableView.scrollRowToVisible(targetRow)
     }
 
+    // MARK: - Row Numbers
+
+    func toggleRowNumbers() {
+        isRowNumbersVisible.toggle()
+        if isRowNumbersVisible {
+            showRowNumbers()
+        } else {
+            hideRowNumbers()
+        }
+    }
+
+    private func showRowNumbers() {
+        let gutterWidth = TableViewController.rowNumberGutterWidth
+        scrollView.contentInsets.left = gutterWidth
+
+        // Position below the header, aligned with the clip view
+        let clipFrame = scrollView.contentView.frame
+        let rnView = RowNumberView(frame: NSRect(
+            x: 0,
+            y: clipFrame.origin.y,
+            width: gutterWidth,
+            height: clipFrame.height
+        ))
+        rnView.autoresizingMask = [.height]
+        rnView.tableView = tableView
+        rnView.onRowClicked = { [weak self] row in
+            self?.tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        }
+        scrollView.addSubview(rnView)
+        rowNumberView = rnView
+        rnView.updateVisibleRows()
+    }
+
+    private func hideRowNumbers() {
+        scrollView.contentInsets.left = 0
+        rowNumberView?.removeFromSuperview()
+        rowNumberView = nil
+    }
+
     // MARK: - Scroll Pre-fetching
 
     @objc private func scrollViewBoundsDidChange(_ notification: Notification) {
+        clearHighlightIfNeeded()
+        if isRowNumbersVisible {
+            rowNumberView?.updateVisibleRows()
+        }
         guard let session = fileSession, session.isFullyLoaded else { return }
 
         let visibleRange = tableView.rows(in: tableView.visibleRect)
@@ -409,7 +508,33 @@ final class TableViewController: NSViewController {
 
         selectedRow = clickedRow
         selectedColumnName = tableView.tableColumns[clickedCol].identifier.rawValue
+        updateCellHighlight(row: clickedRow, column: clickedCol)
         updateDetailPane()
+        statusBar.updateCellLocation(row: clickedRow, columnName: selectedColumnName)
+    }
+
+    private func updateCellHighlight(row: Int, column: Int) {
+        // Clear previous highlight
+        if let prev = highlightedCellView {
+            prev.layer?.borderWidth = 0
+            prev.layer?.borderColor = nil
+        }
+
+        // Apply new highlight — use a border so it's visible over row selection
+        guard let cellView = tableView.view(atColumn: column, row: row, makeIfNecessary: false) else { return }
+        cellView.wantsLayer = true
+        cellView.layer?.borderWidth = 2
+        cellView.layer?.borderColor = NSColor.controlAccentColor.cgColor
+        highlightedCellView = cellView
+    }
+
+    /// Clears highlight when the highlighted cell is scrolled out of view.
+    func clearHighlightIfNeeded() {
+        if let prev = highlightedCellView {
+            prev.layer?.borderWidth = 0
+            prev.layer?.borderColor = nil
+            highlightedCellView = nil
+        }
     }
 
     // MARK: - Copy Operations
@@ -653,7 +778,7 @@ final class TableViewController: NSViewController {
 
     private func makeTableColumn(for descriptor: ColumnDescriptor) -> NSTableColumn {
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(descriptor.name))
-        column.title = "\(descriptor.name) (\(typeLabel(for: descriptor.displayType)))"
+        column.title = "\(descriptor.name.uppercased()) (\(typeLabel(for: descriptor.displayType)))"
         column.width = widthForColumn(descriptor)
         column.minWidth = 50
         column.maxWidth = 2000
@@ -704,14 +829,18 @@ final class TableViewController: NSViewController {
             attrs[.foregroundColor] = NSColor.tertiaryLabelColor
             return NSAttributedString(string: "NULL", attributes: attrs)
         case .integer(let v):
-            let text = TableViewController.integerFormatter.string(from: NSNumber(value: v)) ?? String(v)
+            let text = integerFormatter.string(from: NSNumber(value: v)) ?? String(v)
             return NSAttributedString(string: text, attributes: attrs)
         case .double(let v):
-            let text = TableViewController.floatFormatter.string(from: NSNumber(value: v)) ?? String(v)
+            let text = floatFormatter.string(from: NSNumber(value: v)) ?? String(v)
             return NSAttributedString(string: text, attributes: attrs)
         case .boolean(let v):
             return NSAttributedString(string: v ? "true" : "false", attributes: attrs)
         case .date(let v):
+            // Re-format date according to user settings
+            if let parsed = TableViewController.isoDateParser.date(from: v) {
+                return NSAttributedString(string: dateFormatter.string(from: parsed), attributes: attrs)
+            }
             return NSAttributedString(string: v, attributes: attrs)
         case .string(let v):
             return NSAttributedString(string: v, attributes: attrs)
@@ -906,7 +1035,9 @@ extension TableViewController: NSMenuDelegate {
         selectedRow = clickedRow
         selectedColumnName = tableView.tableColumns[clickedCol].identifier.rawValue
         tableView.selectRowIndexes(IndexSet(integer: clickedRow), byExtendingSelection: false)
+        updateCellHighlight(row: clickedRow, column: clickedCol)
         updateDetailPane()
+        statusBar.updateCellLocation(row: clickedRow, columnName: selectedColumnName)
 
         let copyCell = NSMenuItem(title: "Copy Cell", action: #selector(copyCellValue(_:)), keyEquivalent: "")
         copyCell.target = self
@@ -1079,6 +1210,98 @@ private extension NSFont {
     }
 }
 
+
+// MARK: - RowNumberView
+
+/// Custom view that draws row numbers in the frozen left gutter.
+/// Added as a direct subview of NSScrollView, positioned over the left content inset.
+/// Uses coordinate conversion from the tableView to position row numbers correctly.
+final class RowNumberView: NSView {
+
+    weak var tableView: NSTableView?
+    var onRowClicked: ((Int) -> Void)?
+
+    private var visibleRowRange: Range<Int> = 0..<0
+    private let font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+    private let textColor = NSColor.secondaryLabelColor
+    private let bgColor = NSColor.windowBackgroundColor
+    private let borderColor = NSColor.separatorColor
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        wantsLayer = true
+    }
+
+    func updateVisibleRows() {
+        guard let tableView = tableView else { return }
+        let visibleRect = tableView.visibleRect
+        let range = tableView.rows(in: visibleRect)
+        guard range.length > 0 else { return }
+        let start = max(0, range.location)
+        let end = start + range.length
+        visibleRowRange = start..<end
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let tableView = tableView else { return }
+
+        // Background
+        bgColor.setFill()
+        bounds.fill()
+
+        // Right border
+        borderColor.setStroke()
+        let borderPath = NSBezierPath()
+        borderPath.move(to: NSPoint(x: bounds.maxX - 0.5, y: bounds.minY))
+        borderPath.line(to: NSPoint(x: bounds.maxX - 0.5, y: bounds.maxY))
+        borderPath.lineWidth = 1
+        borderPath.stroke()
+
+        // Draw row numbers using coordinate conversion
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.alignment = .right
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: textColor,
+            .paragraphStyle: paragraphStyle,
+        ]
+
+        for row in visibleRowRange {
+            let rowRect = tableView.rect(ofRow: row)
+            let convertedRect = convert(rowRect, from: tableView)
+            let drawRect = NSRect(
+                x: 4,
+                y: convertedRect.origin.y + 1,
+                width: bounds.width - 10,
+                height: convertedRect.height
+            )
+            guard drawRect.intersects(dirtyRect) else { continue }
+
+            let text = "\(row + 1)"
+            text.draw(in: drawRect, withAttributes: attrs)
+        }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let localPoint = convert(event.locationInWindow, from: nil)
+        guard let tableView = tableView else { return }
+
+        for row in visibleRowRange {
+            let rowRect = tableView.rect(ofRow: row)
+            let convertedRect = convert(rowRect, from: tableView)
+            if localPoint.y >= convertedRect.origin.y && localPoint.y < convertedRect.maxY {
+                onRowClicked?(row)
+                return
+            }
+        }
+    }
+}
 
 // MARK: - Previewer
 

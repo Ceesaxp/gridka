@@ -1,6 +1,6 @@
 import AppKit
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var window: NSWindow!
     private var tableViewController: TableViewController?
     private var emptyStateView: NSView?
@@ -67,6 +67,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "About Gridka", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(NSMenuItem.separator())
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(showSettingsAction(_:)), keyEquivalent: ",")
+        settingsItem.target = self
+        appMenu.addItem(settingsItem)
+        appMenu.addItem(NSMenuItem.separator())
         appMenu.addItem(withTitle: "Quit Gridka", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appMenuItem.submenu = appMenu
         mainMenu.addItem(appMenuItem)
@@ -130,6 +134,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         toggleDetailItem.target = self
         viewMenu.addItem(toggleDetailItem)
 
+        viewMenu.addItem(NSMenuItem.separator())
+
+        let headerToggleItem = NSMenuItem(title: "First Row as Header", action: #selector(toggleHeaderAction(_:)), keyEquivalent: "")
+        headerToggleItem.target = self
+        viewMenu.addItem(headerToggleItem)
+
+        let toggleRowNumbersItem = NSMenuItem(title: "Row Numbers", action: #selector(toggleRowNumbersAction(_:)), keyEquivalent: "")
+        toggleRowNumbersItem.target = self
+        viewMenu.addItem(toggleRowNumbersItem)
+
         viewMenuItem.submenu = viewMenu
         mainMenu.addItem(viewMenuItem)
 
@@ -140,6 +154,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
         windowMenuItem.submenu = windowMenu
         mainMenu.addItem(windowMenuItem)
+
+        // Help menu
+        let helpMenuItem = NSMenuItem()
+        let helpMenu = NSMenu(title: "Help")
+        let shortcutsItem = NSMenuItem(title: "Keyboard Shortcuts", action: #selector(showHelpAction(_:)), keyEquivalent: "")
+        shortcutsItem.target = self
+        helpMenu.addItem(shortcutsItem)
+        helpMenuItem.submenu = helpMenu
+        mainMenu.addItem(helpMenuItem)
 
         NSApp.mainMenu = mainMenu
         NSApp.windowsMenu = windowMenu
@@ -181,6 +204,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             statusBar?.updateProgress(0)
 
             let loadStartTime = CFAbsoluteTimeGetCurrent()
+
+            // Sniff CSV to detect delimiter, encoding, and header presence
+            session.sniffCSV { [weak self] in
+                guard let self = self else { return }
+                statusBar?.updateDelimiter(session.detectedDelimiter)
+                statusBar?.updateEncoding(session.detectedEncoding)
+            }
 
             session.loadPreview { [weak self] result in
                 guard let self = self else { return }
@@ -377,10 +407,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         tableViewController?.copyColumnValues(sender)
     }
 
+    // MARK: - Settings
+
+    @objc private func showSettingsAction(_ sender: Any?) {
+        SettingsWindowController.showSettings()
+    }
+
     // MARK: - View Actions
 
     @objc private func toggleDetailPaneAction(_ sender: Any?) {
         tableViewController?.toggleDetailPane()
+    }
+
+    // MARK: - Header Toggle
+
+    @objc private func toggleHeaderAction(_ sender: Any?) {
+        guard let session = fileSession, let tvc = tableViewController else { return }
+        guard session.isFullyLoaded else { return }
+
+        let newValue = !session.hasHeaders
+
+        tvc.statusBar.updateProgress(0)
+
+        session.reload(withHeaders: newValue, progress: { [weak self] fraction in
+            self?.tableViewController?.statusBar.updateProgress(fraction)
+        }, completion: { [weak self] result in
+            guard let self = self, let tvc = self.tableViewController else { return }
+            switch result {
+            case .success(let totalRows):
+                tvc.statusBar.updateProgress(1.0)
+                tvc.statusBar.updateRowCount(showing: totalRows, total: totalRows)
+                tvc.fileSession = session
+                tvc.configureColumns(session.columns)
+                tvc.autoFitAllColumns()
+            case .failure(let error):
+                tvc.statusBar.updateProgress(1.0)
+                self.showError(error, context: "reloading file")
+            }
+        })
+    }
+
+    // MARK: - Row Numbers Toggle
+
+    @objc private func toggleRowNumbersAction(_ sender: Any?) {
+        tableViewController?.toggleRowNumbers()
     }
 
     // MARK: - Search Handling
@@ -434,6 +504,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Immediately reload to show placeholders
         tvc.reloadVisibleRows()
+    }
+
+    // MARK: - Help
+
+    @objc private func showHelpAction(_ sender: Any?) {
+        HelpWindowController.showHelp()
+    }
+
+    // MARK: - Menu Validation
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(toggleHeaderAction(_:)) {
+            menuItem.state = (fileSession?.hasHeaders ?? true) ? .on : .off
+            return fileSession?.isFullyLoaded ?? false
+        }
+        if menuItem.action == #selector(toggleRowNumbersAction(_:)) {
+            menuItem.state = (tableViewController?.isRowNumbersVisible ?? false) ? .on : .off
+            return tableViewController != nil
+        }
+        return true
     }
 
     // MARK: - Error Handling

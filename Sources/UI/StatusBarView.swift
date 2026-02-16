@@ -28,6 +28,30 @@ final class StatusBarView: NSView {
         return label
     }()
 
+    private let cellLocationLabel: NSTextField = {
+        let label = NSTextField(labelWithString: "")
+        label.font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+        label.textColor = .secondaryLabelColor
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
+    private let delimiterLabel: NSTextField = {
+        let label = NSTextField(labelWithString: "")
+        label.font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+        label.textColor = .secondaryLabelColor
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
+    private let encodingLabel: NSTextField = {
+        let label = NSTextField(labelWithString: "")
+        label.font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+        label.textColor = .secondaryLabelColor
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
     private let progressLabel: NSTextField = {
         let label = NSTextField(labelWithString: "")
         label.font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
@@ -79,6 +103,9 @@ final class StatusBarView: NSView {
         addSubview(rowCountLabel)
         addSubview(fileSizeLabel)
         addSubview(loadTimeLabel)
+        addSubview(cellLocationLabel)
+        addSubview(delimiterLabel)
+        addSubview(encodingLabel)
         addSubview(progressLabel)
 
         let inset: CGFloat = 10
@@ -97,8 +124,18 @@ final class StatusBarView: NSView {
             loadTimeLabel.leadingAnchor.constraint(equalTo: fileSizeLabel.trailingAnchor, constant: 16),
             loadTimeLabel.centerYAnchor.constraint(equalTo: centerYAnchor, constant: 1),
 
+            cellLocationLabel.leadingAnchor.constraint(equalTo: loadTimeLabel.trailingAnchor, constant: 16),
+            cellLocationLabel.centerYAnchor.constraint(equalTo: centerYAnchor, constant: 1),
+
+            // Right side: progress | delimiter | encoding
             progressLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
             progressLabel.centerYAnchor.constraint(equalTo: centerYAnchor, constant: 1),
+
+            encodingLabel.trailingAnchor.constraint(equalTo: progressLabel.leadingAnchor, constant: -16),
+            encodingLabel.centerYAnchor.constraint(equalTo: centerYAnchor, constant: 1),
+
+            delimiterLabel.trailingAnchor.constraint(equalTo: encodingLabel.leadingAnchor, constant: -16),
+            delimiterLabel.centerYAnchor.constraint(equalTo: centerYAnchor, constant: 1),
         ])
     }
 
@@ -156,10 +193,35 @@ final class StatusBarView: NSView {
         }
     }
 
+    func updateCellLocation(row: Int, columnName: String) {
+        let rowText = StatusBarView.rowFormatter.string(from: NSNumber(value: row + 1)) ?? "\(row + 1)"
+        cellLocationLabel.stringValue = "Row \(rowText) | Col: \(columnName)"
+    }
+
+    func updateDelimiter(_ delimiter: String) {
+        let readable: String
+        switch delimiter {
+        case ",":  readable = "Comma"
+        case "\t": readable = "Tab"
+        case ";":  readable = "Semicolon"
+        case "|":  readable = "Pipe"
+        case " ":  readable = "Space"
+        default:   readable = "\"\(delimiter)\""
+        }
+        delimiterLabel.stringValue = readable
+    }
+
+    func updateEncoding(_ encoding: String) {
+        encodingLabel.stringValue = encoding
+    }
+
     func clear() {
         rowCountLabel.stringValue = ""
         fileSizeLabel.stringValue = ""
         loadTimeLabel.stringValue = ""
         progressLabel.stringValue = ""
+        cellLocationLabel.stringValue = ""
+        delimiterLabel.stringValue = ""
+        encodingLabel.stringValue = ""
     }
 }

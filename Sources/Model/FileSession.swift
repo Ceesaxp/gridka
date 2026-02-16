@@ -17,6 +17,15 @@ final class FileSession {
     /// Total row count before any filters are applied.
     private(set) var totalRows: Int = 0
 
+    /// Detected CSV delimiter from sniff_csv.
+    private(set) var detectedDelimiter: String = ","
+    /// Whether the CSV has a header row (detected by sniff_csv).
+    private(set) var detectedHasHeader: Bool = true
+    /// User-togglable header setting. Initialized from sniff result.
+    var hasHeaders: Bool = true
+    /// Detected file encoding.
+    private(set) var detectedEncoding: String = "UTF-8"
+
     // MARK: - Init
 
     init(filePath: URL) throws {
@@ -34,11 +43,67 @@ final class FileSession {
         self.engine = try DuckDBEngine()
     }
 
+    // MARK: - CSV Sniffing
+
+    func sniffCSV(completion: @escaping () -> Void) {
+        let path = filePath.path.replacingOccurrences(of: "'", with: "''")
+        let sql = "SELECT * FROM sniff_csv('\(path)')"
+
+        // Detect encoding from BOM
+        detectEncoding()
+
+        queryQueue.async { [weak self] in
+            guard let self = self else { return }
+            do {
+                let result = try self.engine.execute(sql)
+                if result.rowCount > 0 {
+                    // Extract delimiter (column 0)
+                    if case .string(let delim) = result.value(row: 0, col: 0) {
+                        DispatchQueue.main.async {
+                            self.detectedDelimiter = delim
+                        }
+                    }
+                    // Extract HasHeader (column 4)
+                    if case .boolean(let hasHeader) = result.value(row: 0, col: 4) {
+                        DispatchQueue.main.async {
+                            self.detectedHasHeader = hasHeader
+                            self.hasHeaders = hasHeader
+                        }
+                    }
+                }
+            } catch {
+                // Sniff failed — keep defaults
+            }
+
+            DispatchQueue.main.async {
+                completion()
+            }
+        }
+    }
+
+    private func detectEncoding() {
+        guard let handle = FileHandle(forReadingAtPath: filePath.path) else { return }
+        let data = handle.readData(ofLength: 4)
+        handle.closeFile()
+
+        let bytes = [UInt8](data)
+        if bytes.count >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF {
+            detectedEncoding = "UTF-8 (BOM)"
+        } else if bytes.count >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE {
+            detectedEncoding = "UTF-16 LE"
+        } else if bytes.count >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF {
+            detectedEncoding = "UTF-16 BE"
+        } else {
+            detectedEncoding = "UTF-8"
+        }
+    }
+
     // MARK: - Preview Loading
 
     func loadPreview(completion: @escaping (Result<[ColumnDescriptor], Error>) -> Void) {
         let path = filePath.path.replacingOccurrences(of: "'", with: "''")
-        let sql = "SELECT * FROM read_csv_auto('\(path)', ignore_errors = true) LIMIT 1000"
+        let headerParam = hasHeaders ? "true" : "false"
+        let sql = "SELECT * FROM read_csv_auto('\(path)', ignore_errors = true, header = \(headerParam)) LIMIT 1000"
 
         queryQueue.async { [weak self] in
             guard let self = self else { return }
@@ -65,7 +130,8 @@ final class FileSession {
 
     func loadFull(progress: @escaping (Double) -> Void, completion: @escaping (Result<Int, Error>) -> Void) {
         let path = filePath.path.replacingOccurrences(of: "'", with: "''")
-        let createSQL = "CREATE TABLE data AS SELECT row_number() OVER () AS _gridka_rowid, * FROM read_csv_auto('\(path)', ignore_errors = true)"
+        let headerParam = hasHeaders ? "true" : "false"
+        let createSQL = "CREATE TABLE data AS SELECT row_number() OVER () AS _gridka_rowid, * FROM read_csv_auto('\(path)', ignore_errors = true, header = \(headerParam))"
         let countSQL = "SELECT COUNT(*) FROM data"
 
         queryQueue.async { [weak self] in
@@ -137,6 +203,63 @@ final class FileSession {
                 DispatchQueue.main.async {
                     self.rowCache.insertPage(page)
                     completion(.success(page))
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    completion(.failure(error))
+                }
+            }
+        }
+    }
+
+    // MARK: - Reload with Header Toggle
+
+    func reload(withHeaders: Bool, progress: @escaping (Double) -> Void, completion: @escaping (Result<Int, Error>) -> Void) {
+        hasHeaders = withHeaders
+        let path = filePath.path.replacingOccurrences(of: "'", with: "''")
+        let headerParam = hasHeaders ? "true" : "false"
+        let dropSQL = "DROP TABLE IF EXISTS data"
+        let createSQL = "CREATE TABLE data AS SELECT row_number() OVER () AS _gridka_rowid, * FROM read_csv_auto('\(path)', ignore_errors = true, header = \(headerParam))"
+        let countSQL = "SELECT COUNT(*) FROM data"
+
+        queryQueue.async { [weak self] in
+            guard let self = self else { return }
+
+            DispatchQueue.main.async { progress(0.0) }
+
+            do {
+                try self.engine.execute(dropSQL)
+                DispatchQueue.main.async { progress(0.3) }
+
+                try self.engine.execute(createSQL)
+                DispatchQueue.main.async { progress(0.8) }
+
+                let countResult = try self.engine.execute(countSQL)
+                let totalRows: Int
+                if countResult.rowCount > 0, case .integer(let count) = countResult.value(row: 0, col: 0) {
+                    totalRows = Int(count)
+                } else {
+                    totalRows = 0
+                }
+
+                let colResult = try self.engine.execute("SELECT * FROM data LIMIT 0")
+                let cols = self.extractColumns(from: colResult)
+
+                DispatchQueue.main.async {
+                    self.columns = cols
+                    self.isFullyLoaded = true
+                    self.totalRows = totalRows
+                    // Reset view state — column names change on header toggle
+                    self.viewState = ViewState(
+                        sortColumns: [],
+                        filters: [],
+                        searchTerm: nil,
+                        visibleRange: 0..<0,
+                        totalFilteredRows: totalRows
+                    )
+                    self.rowCache.invalidateAll()
+                    progress(1.0)
+                    completion(.success(totalRows))
                 }
             } catch {
                 DispatchQueue.main.async {
