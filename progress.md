@@ -418,3 +418,372 @@
   - The serial query queue naturally prevents duplicate page fetches from causing issues — if the same page is requested while an existing fetch is in-flight, the fetchingPages Set blocks it
   - NotificationCenter observer is removed in deinit to prevent dangling observers after TableViewController is deallocated
 ----
+
+## 2026-02-19 - US-001 - Add file save infrastructure (⌘S)
+- Added `isModified: Bool` property to FileSession with `didSet` observer that dispatches to main thread
+- `onModifiedChanged` callback on FileSession allows AppDelegate to wire up `window.isDocumentEdited` for the native macOS dirty dot in the close button
+- Added `save(completion:)` method to FileSession that executes `COPY (SELECT <columns> FROM data) TO 'path' (FORMAT CSV, HEADER true/false, DELIMITER '...')` on the serial query queue
+- The COPY SELECT uses an explicit column list excluding `_gridka_rowid` via `QueryCoordinator.quote()` for each column name
+- On save success, `isModified` is set to false (clears the window dirty indicator)
+- On save error, completion returns `.failure` and AppDelegate shows an NSAlert
+- Added File > Save menu item with ⌘S shortcut in AppDelegate
+- Save menu item is enabled only when `isModified` is true via `validateMenuItem`
+- `onModifiedChanged` callback is wired in `openFile(at:)` to update `window.isDocumentEdited`
+- Files changed: Sources/Model/FileSession.swift, Sources/App/AppDelegate.swift, plans/prd.json
+- Build succeeds, all 64 tests pass
+- **Learnings for future iterations:**
+  - `isModified` uses a `didSet` property observer with a guard against redundant changes — avoids infinite loops or unnecessary UI updates
+  - The `onModifiedChanged` callback pattern decouples FileSession from AppKit/NSWindow — FileSession doesn't need to know about windows
+  - DuckDB `COPY TO` with `FORMAT CSV` supports `HEADER` and `DELIMITER` parameters directly — no need for Swift-side file writing
+  - The effective delimiter and hasHeaders settings from FileSession are reused in the COPY command to preserve the file's original format
+  - Subsequent editing stories (US-003, US-005, etc.) just need to set `fileSession.isModified = true` after their mutations
+----
+
+## 2026-02-19 - US-002 - Add Save As with encoding and delimiter selection (⇧⌘S)
+- Created Sources/UI/SavePanelAccessoryView.swift: NSView subclass with two NSPopUpButtons for encoding and delimiter selection
+  - 10 encoding options: UTF-8, UTF-16 LE/BE, Latin-1, Windows-1252, ASCII, Shift-JIS, EUC-KR, GB2312, Big5
+  - 5 delimiter options: Comma, Tab, Semicolon, Pipe, Tilde
+  - Default selections match the file's detected encoding and current delimiter
+  - Uses Auto Layout internally for label + popup layout
+- Added `saveAs(to:encoding:delimiter:completion:)` method to FileSession
+  - For UTF-8 encoding: uses DuckDB `COPY TO` directly (fast, native)
+  - For non-UTF-8 encodings: queries all data, builds CSV manually in Swift, transcodes via `String.data(using:)`, writes with `Data.write(to:)`
+  - After save, updates `filePath` to the new URL and clears `isModified`
+- Changed `FileSession.filePath` from `let` to `private(set) var` so it can update after Save As
+- Added File > Save As… menu item with ⇧⌘S shortcut in AppDelegate
+  - Opens NSSavePanel with accessory view and allowed types: csv, tsv, txt
+  - Default filename matches the original file
+  - On success, updates window title and subtitle to the new path
+- Save As menu item enabled when file is fully loaded (via validateMenuItem)
+- Files changed: Sources/UI/SavePanelAccessoryView.swift (new), Sources/Model/FileSession.swift, Sources/App/AppDelegate.swift, plans/prd.json
+- Build succeeds, all 64 tests pass
+- **Learnings for future iterations:**
+  - DuckDB `COPY TO` does not support an encoding parameter — only outputs UTF-8. For non-UTF-8 encodings, must query data and transcode in Swift
+  - NSSavePanel.accessoryView displays the custom view below the filename field — perfect for encoding/delimiter controls
+  - NSSavePanel.allowedContentTypes uses UTType (.commaSeparatedText, .tabSeparatedText, .plainText) — same as NSOpenPanel
+  - String.Encoding for CJK encodings uses raw values: EUC-KR = 0x80000940, GB2312 = 0x80000930, Big5 = 0x80000A03
+  - The CSV manual writing fallback must handle CSV escaping (quotes, delimiters, newlines in fields) since DuckDB isn't doing it
+  - `FileSession.filePath` changed from `let` to `private(set) var` — needed so Save As can update the tracked file path
+  - The `window.subtitle` property shows the directory path below the title — useful for Save As to show the new location
+----
+
+## 2026-02-19 - US-003 - Add inline cell editing
+- Added `doubleAction` handler on NSTableView to detect double-clicks on cells
+- Double-clicking a cell creates a borderless NSTextField overlay positioned exactly over the cell via `tableView.frameOfCell(atColumn:row:)`
+- The text field is pre-populated with the raw `DuckDBValue.description` (not formatted display value)
+- Pressing Enter commits the edit by firing `onCellEdited` callback with rowid, column name, new value, and display row
+- Pressing Escape cancels the edit and removes the text field without changes
+- Edit field is also dismissed on scroll (via `scrollViewBoundsDidChange`) and on single-click elsewhere
+- The `_gridka_rowid` column cells are not editable (double-click does nothing on them)
+- NULL cells show an empty text field; the value is committed as-is (empty string)
+- Added `FileSession.updateCell(rowid:column:value:displayRow:completion:)` that executes `UPDATE data SET "column" = 'value' WHERE _gridka_rowid = N` on the serial query queue
+- After a successful UPDATE, the cache page containing the display row is invalidated and re-fetched to show the updated value
+- `FileSession.isModified` is set to true after a successful edit (shows the native macOS dirty dot)
+- Added `RowCache.invalidatePage(_:)` method for single-page cache invalidation
+- Changed `TableViewController.updateDetailPane()` from private to internal so AppDelegate can call it after edit
+- Added `NSTextFieldDelegate` conformance on TableViewController to intercept Enter (`insertNewline`) and Escape (`cancelOperation`) via `control(_:textView:doCommandBy:)`
+- Edit field matches the cell's font (monospaced digit) and alignment (right for numeric columns, left for text)
+- Files changed: Sources/UI/TableViewController.swift, Sources/Model/FileSession.swift, Sources/Engine/RowCache.swift, Sources/App/AppDelegate.swift, plans/prd.json
+- Build succeeds, all 64 tests pass
+- **Learnings for future iterations:**
+  - `tableView.frameOfCell(atColumn:row:)` returns the cell frame in the table view's coordinate space — perfect for positioning an overlay edit field
+  - `tableView.doubleAction` is the standard hook for double-click on NSTableView — it fires on the `target` object just like `action` does for single clicks
+  - `NSTextFieldDelegate`'s `control(_:textView:doCommandBy:)` is the correct way to intercept Enter/Escape in an NSTextField — return `true` to indicate the command was handled
+  - `insertNewline` selector corresponds to Enter key, `cancelOperation` corresponds to Escape key
+  - The `_gridka_rowid` for a display row must be read from the row cache (not derived from the row index), because sorting/filtering changes the mapping between display rows and rowid values
+  - Cache invalidation after edit uses the display row to find the correct page index, since with sorting the rowid-based page index would be wrong
+  - Single-page invalidation via `RowCache.invalidatePage(_:)` is more efficient than `invalidateAll()` for single-cell edits
+----
+
+## 2026-02-19 - US-004 - Add cell edit navigation and visual indicators
+- Added Tab/Shift+Tab navigation while editing cells via `insertTab` and `insertBacktab` command selectors in `control(_:textView:doCommandBy:)`
+- Tab commits current edit and moves to the next editable cell in the row; Shift+Tab moves to previous
+- At the last column, Tab wraps to the first editable column of the next row; at the first column, Shift+Tab wraps to the last editable column of the previous row
+- Navigation skips `_gridka_rowid` columns (they are never editable)
+- Created `EditedCell` struct (Hashable) with `rowid: Int64` and `column: String` for tracking edited cells
+- Added `editedCells: Set<EditedCell>` on FileSession, populated when `updateCell` succeeds
+- `editedCells` is cleared when `isModified` becomes false (on save)
+- Each cell in `tableView(_:viewFor:row:)` checks if its rowid+column is in the edited set and shows/hides a 3pt accent-colored dot CALayer in the top-right corner
+- Dot layer uses `autoresizingMask = [.layerMinXMargin]` to stay positioned when cell width changes
+- Added `wantsLayer = true` on cell NSTextField for reliable sublayer rendering
+- Files changed: Sources/Model/FileSession.swift, Sources/UI/TableViewController.swift, plans/prd.json
+- Build succeeds, all 64 tests pass
+- **Learnings for future iterations:**
+  - `insertTab` and `insertBacktab` are the correct selectors for Tab and Shift+Tab in `control(_:textView:doCommandBy:)` — these correspond to `NSResponder.insertTab(_:)` and `NSResponder.insertBacktab(_:)`
+  - CALayer coordinates in layer-backed NSViews follow the view's `isFlipped` property — NSTextField is flipped, so y=0 is at the top in the layer coordinate space
+  - When adding sublayers to recycled NSTableView cells, always check for existing layers by name and remove/reposition them — otherwise dots accumulate on reused cells
+  - `commitEditAndMove(direction:)` dispatches the next `beginEditing` call via `DispatchQueue.main.async` to let scroll settling complete before positioning the edit field
+  - The `editedCells` set uses the stable `_gridka_rowid` (not the display row index) so indicators survive sort/filter changes
+----
+
+## 2026-02-19 - US-005 - Add column via Edit menu
+- Added `addColumn(name:duckDBType:completion:)` method to FileSession that executes `ALTER TABLE data ADD COLUMN "col_name" TYPE` on the serial query queue
+- After ALTER TABLE, re-extracts column descriptors via `SELECT * FROM data LIMIT 0` to refresh the schema
+- Sets `isModified = true` and invalidates row cache on success
+- Created Sources/UI/AddColumnSheetController.swift: NSViewController sheet with:
+  - NSTextField for column name with placeholder "new_column"
+  - NSPopUpButton for type selection: Text (VARCHAR), Integer (BIGINT), Float (DOUBLE), Date (DATE), Boolean (BOOLEAN)
+  - Inline validation: name must be non-empty and not duplicate an existing column
+  - Real-time validation as user types via NSTextFieldDelegate controlTextDidChange
+  - Cancel (Escape) and Add Column (Enter) buttons
+- Added Edit > Add Column… menu item with ⌥⌘N shortcut in AppDelegate
+- Menu item enabled only when file is fully loaded via validateMenuItem
+- On success, configureColumns() is called with the refreshed column list and the table scrolls horizontally to reveal the new column
+- Presented as a sheet on the TableViewController (since AppDelegate doesn't use window.contentViewController)
+- Files changed: Sources/Model/FileSession.swift, Sources/UI/AddColumnSheetController.swift (new), Sources/App/AppDelegate.swift, plans/prd.json
+- Build succeeds, all 64 tests pass
+- **Learnings for future iterations:**
+  - AppDelegate doesn't set `window.contentViewController` — sheets must be presented on the TableViewController instead
+  - `presentAsSheet()` is an NSViewController method that presents another view controller as a sheet attached to the presenter's window
+  - The AddColumnSheetController uses Auto Layout internally (fine per project convention — only the window boundary should use autoresizing masks)
+  - `ALTER TABLE data ADD COLUMN` in DuckDB adds the column with NULL values for all existing rows — no data migration needed
+  - After schema changes, the row cache must be invalidated since the column list has changed
+  - NSTextFieldDelegate's `controlTextDidChange` fires on every keystroke — use it for real-time validation of the column name field
+----
+
+## 2026-02-19 - US-006 - Rename column from header context menu
+- Added `renameColumn(oldName:newName:completion:)` method to FileSession that executes `ALTER TABLE data RENAME COLUMN "old" TO "new"` on the serial query queue
+- After ALTER TABLE, re-extracts column descriptors via `SELECT * FROM data LIMIT 0` to refresh the schema
+- Sets `isModified = true` and invalidates row cache on success
+- Automatically updates ViewState's sortColumns and filters arrays by replacing occurrences of the old column name with the new one
+- Also updates `editedCells` set to rename column references so edit indicators persist correctly after rename
+- Created Sources/UI/RenameColumnPopoverController.swift: popover with NSTextField pre-filled with the current column name
+  - Real-time validation: name must not be empty and must not duplicate an existing column name
+  - Rename button (Enter key) and Cancel button (Escape key)
+  - Error label shown inline when validation fails
+- Added "Rename Column…" item to the column header right-click context menu in TableViewController
+  - Item is hidden for the `_gridka_rowid` column
+  - Clicking opens the rename popover positioned relative to the column header
+- Added `onColumnRenamed` callback on TableViewController, wired through AppDelegate
+- AppDelegate's `handleColumnRenamed` calls FileSession.renameColumn, then reconfigures columns, updates sort indicators, filter bar, and re-fetches page 0
+- Files changed: Sources/Model/FileSession.swift, Sources/UI/TableViewController.swift, Sources/UI/RenameColumnPopoverController.swift (new), Sources/App/AppDelegate.swift, plans/prd.json
+- Build succeeds, all 64 tests pass
+- **Learnings for future iterations:**
+  - `ALTER TABLE data RENAME COLUMN` in DuckDB works for renaming columns in materialized tables — no workaround needed
+  - When renaming a column, ViewState's sortColumns and filters must be updated since they reference column names as strings — without this, sorting and filtering would break after a rename
+  - The `editedCells` set also needs updating since it tracks `(rowid, columnName)` pairs — cells edited before the rename would lose their dot indicators otherwise
+  - RenameColumnPopoverController follows the same pattern as FilterPopoverViewController: it holds a weak `popover` reference for self-dismissal
+  - The header context menu correctly hides "Rename Column…" for `_gridka_rowid` since that's a synthetic column that shouldn't be user-modifiable
+  - After rename, `configureColumns` rebuilds all NSTableColumns with new identifiers, and `updateSortIndicators`/`updateFilterBar` ensure the UI reflects renamed references
+----
+
+## 2026-02-19 - US-007 - Change column type from header context menu
+- Added `changeColumnType(columnName:newDuckDBType:completion:)` method to FileSession that executes `ALTER TABLE data ALTER COLUMN "col" SET DATA TYPE <new_type>` on the serial query queue
+- Includes fallback workaround if ALTER COLUMN is not supported: adds temp column with CAST, drops original, renames temp back — handles errors and cleans up temp column on failure
+- After type change, column descriptors are refreshed via `SELECT * FROM data LIMIT 0`, row cache is invalidated, and `isModified` is set to true
+- Added 'Change Type' submenu to the column header right-click context menu in TableViewController with options: Text (VARCHAR), Integer (BIGINT), Float (DOUBLE), Date (DATE), Boolean (BOOLEAN)
+- Current type has a checkmark (`.on` state); selecting the current type does nothing (guard in action handler)
+- Submenu is hidden for the `_gridka_rowid` column
+- Added `onColumnTypeChanged` callback on TableViewController, wired through AppDelegate
+- AppDelegate's `handleColumnTypeChanged` calls FileSession.changeColumnType, then reconfigures columns, updates sort indicators, re-fetches page 0, and reloads visible rows
+- If the CAST fails (e.g., text that can't be converted to INTEGER), the error is shown via NSAlert
+- Files changed: Sources/Model/FileSession.swift, Sources/UI/TableViewController.swift, Sources/App/AppDelegate.swift, plans/prd.json
+- Build succeeds, all 64 tests pass
+- **Learnings for future iterations:**
+  - DuckDB `ALTER TABLE ALTER COLUMN SET DATA TYPE` may or may not be supported depending on the vendored version — the fallback with add+CAST+drop+rename is more reliable
+  - The fallback approach must handle cleanup: if the UPDATE with CAST fails, the temp column needs to be dropped to avoid leaving the table in a dirty state
+  - `representedObject` for menu items with multiple values can use `[String]` arrays — cast back with `as? [String]` and check count
+  - DisplayType to DuckDB type string mapping: Text→VARCHAR, Integer→BIGINT, Float→DOUBLE, Date→DATE, Boolean→BOOLEAN — this mapping is used both in the submenu checkmark logic and in the AddColumnSheetController
+  - After type change, the row cache must be fully invalidated since the same column's values may now have different DuckDBValue types (e.g., strings become integers)
+----
+
+## 2026-02-19 - US-008 - Delete column from header context menu
+- Added `deleteColumn(name:completion:)` method to FileSession that executes `ALTER TABLE data DROP COLUMN "col_name"` on the serial query queue
+- After DROP COLUMN, re-extracts column descriptors via `SELECT * FROM data LIMIT 0` to refresh the schema
+- Sets `isModified = true` and invalidates row cache on success
+- Automatically removes ViewState's sortColumns and filters referencing the deleted column name
+- Also removes `editedCells` entries for the deleted column so stale dot indicators don't persist
+- Added "Delete Column" item to the column header right-click context menu in TableViewController
+  - Item is hidden for the `_gridka_rowid` column (not shown in menu at all)
+  - Shows confirmation NSAlert: 'Delete column "col_name"? This cannot be undone.' with Delete and Cancel buttons
+- Added `onColumnDeleted` callback on TableViewController, wired through AppDelegate
+- AppDelegate's `handleColumnDeleted` calls FileSession.deleteColumn, then reconfigures columns, updates sort indicators, filter bar, re-fetches page 0, and reloads visible rows
+- Files changed: Sources/Model/FileSession.swift, Sources/UI/TableViewController.swift, Sources/App/AppDelegate.swift, plans/prd.json
+- Build succeeds, all 64 tests pass
+- **Learnings for future iterations:**
+  - `ALTER TABLE data DROP COLUMN` in DuckDB works for dropping columns from materialized tables — no workaround needed
+  - When deleting a column, ViewState's sortColumns and filters must be cleaned up via `removeAll(where:)` since they reference column names as strings — without this, sorting and filtering would break after deletion
+  - The `editedCells` set also needs cleanup since it tracks `(rowid, columnName)` pairs — cells edited in the deleted column would otherwise leave phantom entries
+  - The confirmation NSAlert uses `beginSheetModal(for:)` to present as a sheet on the window — `view.window` on the TableViewController provides access to the parent window
+  - The pattern follows renameColumn and changeColumnType closely: FileSession method → TVC callback → AppDelegate handler → reconfigure columns + re-fetch page 0
+----
+
+## 2026-02-19 - US-009 - Add new row via Edit menu
+- Added `addRow(completion:)` method to FileSession that executes `INSERT INTO data (_gridka_rowid) VALUES ((SELECT COALESCE(MAX(_gridka_rowid), 0) + 1 FROM data))` on the serial query queue
+- After INSERT, queries `MAX(_gridka_rowid)` to get the new row's ID, increments `totalRows` and `totalFilteredRows` by 1, sets `isModified = true`
+- Invalidates the last page of the row cache (the page containing the new row) for correct data display
+- Added Edit > Add Row menu item with ⌥⌘R shortcut in AppDelegate, enabled only when file is fully loaded via validateMenuItem
+- AppDelegate's `handleAddRow()` calls FileSession.addRow, reloads table, updates status bar row counts, scrolls to the new row via `scrollRowToVisible(totalFilteredRows - 1)`
+- After scrolling, fetches the page containing the new row and auto-enters edit mode on the first editable cell (skips `_gridka_rowid`)
+- Added `beginEditingCell(row:column:columnName:)` as a public wrapper on TableViewController so AppDelegate can trigger inline editing programmatically
+- Files changed: Sources/Model/FileSession.swift, Sources/UI/TableViewController.swift, Sources/App/AppDelegate.swift, plans/prd.json
+- Build succeeds, all 64 tests pass
+- **Learnings for future iterations:**
+  - The INSERT must include `_gridka_rowid` explicitly since it's not auto-generated by DuckDB — the `COALESCE(MAX(...), 0) + 1` pattern generates a unique ID
+  - After INSERT, `totalRows` and `totalFilteredRows` are incremented on the main thread without a re-query — this is safe because INSERT always adds exactly one row
+  - The `beginEditing` method on TableViewController was private — added a public `beginEditingCell` wrapper rather than changing visibility, keeping the internal method name consistent with existing callers
+  - The auto-edit flow uses `DispatchQueue.main.async` to dispatch `beginEditingCell` after the page fetch completes, ensuring the cell data is available in the cache before editing starts
+  - Cache invalidation after INSERT only needs to invalidate the last page (where the new row appears), not the entire cache — using `RowCache.invalidatePage(_:)` for efficiency
+----
+
+## 2026-02-19 - US-010 - Delete selected row(s) via Edit menu
+- Enabled multi-row selection by changing `tableView.allowsMultipleSelection` from `false` to `true` in TableViewController
+- Added `deleteRows(rowids:completion:)` method to FileSession that executes `DELETE FROM data WHERE _gridka_rowid IN (id1, id2, ...)` on the serial query queue
+- After DELETE, re-queries `COUNT(*)` to get the new total rows, invalidates the entire row cache, and removes edited cell indicators for deleted rows
+- Added `requeryFilteredCount()` public wrapper on FileSession to expose the private `requeryCount()` — needed because `updateViewState` only re-queries when filters/search change, not after row deletion
+- Added Edit > Delete Row(s) menu item with ⌘Delete shortcut in AppDelegate
+- Menu item is enabled only when file is fully loaded AND at least one row is selected (via `validateMenuItem`)
+- Shows confirmation NSAlert: "Delete N row(s)? This cannot be undone." with Delete and Cancel buttons
+- On confirm, collects `_gridka_rowid` values for all selected rows from the row cache, executes the DELETE, reloads table, and updates status bar row counts
+- Row selection is cleared after deletion via `tableView.deselectAll(nil)`
+- Files changed: Sources/UI/TableViewController.swift, Sources/Model/FileSession.swift, Sources/App/AppDelegate.swift, plans/prd.json
+- Build succeeds, all 64 tests pass
+- **Learnings for future iterations:**
+  - `tableView.allowsMultipleSelection` was previously `false` — changed to `true` to support multi-row selection for deletion
+  - The ⌘Delete keyboard shortcut uses `"\u{08}"` (backspace character) as the key equivalent in NSMenuItem
+  - After row deletion, `updateViewState(session.viewState)` does NOT trigger `requeryCount` because the filters/search haven't changed — must explicitly call `requeryFilteredCount()` to update `totalFilteredRows`
+  - The `requeryCount` method was private on FileSession — added a public `requeryFilteredCount()` wrapper rather than changing visibility, keeping the internal method name consistent
+  - Row deletion must invalidate the entire cache (not just specific pages) because the deletion changes the mapping between display row indices and actual data for all pages after the deleted rows
+  - Collecting rowids from the cache before DELETE is important — after cache invalidation, the mapping would be wrong. The selectedRowIndexes from NSTableView are display indices, not rowids
+----
+
+## 2026-02-19 - US-011 - Reload file with a different encoding
+- Added `overrideEncoding` property and `activeEncodingName` computed property to FileSession for tracking user-selected encoding override
+- Added `reload(withEncoding:swiftEncoding:progress:completion:)` method to FileSession that handles encoding-based reload
+  - For UTF-8 / auto-detect: delegates to existing `reloadTable()` (DuckDB reads UTF-8 natively)
+  - For non-UTF-8 encodings: reads file data, transcodes to UTF-8 via `String(data:encoding:)`, writes to temp file in `~/Library/Caches/com.gridka.app/`, loads the temp file into DuckDB, then cleans up temp file
+- Added View > Encoding submenu in AppDelegate with 10 encoding options: UTF-8, UTF-16 LE, UTF-16 BE, Latin-1/ISO-8859-1, Windows-1252, ASCII, Shift-JIS, EUC-KR, GB2312, Big5
+- Current active encoding has a checkmark via `validateMenuItem` using `fileSession.activeEncodingName`
+- Selecting a different encoding triggers reload; selecting the current encoding does nothing
+- If `isModified` is true, shows confirmation alert: "Reloading will discard unsaved changes. Continue?" with Reload and Cancel buttons
+- After successful reload: status bar encoding label updates, columns reconfigure, table auto-fits
+- Added `swiftEncoding(forName:)` static helper on AppDelegate mapping encoding display names to `String.Encoding` values (returns nil for UTF-8 since no transcoding needed)
+- Files changed: Sources/Model/FileSession.swift, Sources/App/AppDelegate.swift, plans/prd.json
+- Build succeeds, all 64 tests pass
+- **Learnings for future iterations:**
+  - DuckDB `read_csv_auto` does not support an encoding parameter — it only reads UTF-8. For non-UTF-8 files, must transcode to a temp UTF-8 file first
+  - The transcoding approach: `Data(contentsOf:)` → `String(data:encoding:)` → `.data(using: .utf8)` → write temp file → load via DuckDB
+  - Temp files are written to `~/Library/Caches/com.gridka.app/` with UUID-based names and cleaned up after loading
+  - `activeEncodingName` returns `overrideEncoding ?? detectedEncoding` — when no override is set, the BOM-detected encoding is shown
+  - The encoding reload flow follows the same pattern as delimiter/header reload: FileSession.reload → AppDelegate handler → reconfigure columns + update status bar
+  - String.Encoding raw values for CJK encodings: EUC-KR = 0x80000940, GB2312 = 0x80000930, Big5 = 0x80000A03 — same values used in SavePanelAccessoryView
+  - The `validateMenuItem` for encoding items compares the `representedObject` encoding name against `fileSession.activeEncodingName` to show the checkmark on the current encoding
+----
+
+## 2026-02-19 - US-012 - Display column type icons in headers
+- Replaced textual `(type)` suffix in column headers with SF Symbol icons using `NSTextAttachment` in attributed strings
+- Icon mapping: Text → `textformat`, Integer → `number`, Float → `textformat.123`, Date → `calendar`, Boolean → `checkmark.circle`, Unknown → `questionmark.circle`
+- Icons use `NSImage.SymbolConfiguration(pointSize: 10, weight: .regular)` tinted with `secondaryLabelColor`
+- ~4pt spacing between the icon and the column name text (thin space + regular space)
+- Column headers now show: [icon] COLUMN_NAME [sort indicator]
+- Sort indicators (▲/▼ arrows and numbered multi-sort like 1▲, 2▼) still appear after the column name
+- Added `column.headerToolTip` with full DuckDB type name (e.g., 'VARCHAR', 'BIGINT', 'DOUBLE')
+- Added helper methods: `typeIconName(for:)`, `duckDBTypeName(for:)`, `buildHeaderAttributedString(columnName:descriptor:sortSuffix:)`
+- Updated `styleHeaderCell` to accept optional `sortSuffix` parameter and compose the full attributed string with icon + name + sort
+- Updated `updateSortIndicators()` to pass sort suffix to `styleHeaderCell` instead of manipulating `column.title` with text type labels
+- Added `NSImage.tinted(with:)` private extension for coloring SF Symbol images used in `NSTextAttachment`
+- `column.title` is set to plain `descriptor.name.uppercased()` for internal use (auto-fit width measurement)
+- Files changed: Sources/UI/TableViewController.swift, plans/prd.json
+- Build succeeds, all 64 tests pass
+- **Learnings for future iterations:**
+  - SF Symbols in `NSTextAttachment` need manual tinting via `NSImage.lockFocus()` + `color.set()` + `fill(using: .sourceAtop)` since `NSTextAttachment` doesn't inherit text color
+  - `NSTextAttachment.bounds` y-offset of -1 aligns the icon baseline with the text baseline in header cells
+  - `NSImage(systemSymbolName:accessibilityDescription:)` returns template images — `withSymbolConfiguration()` sets the size but not the color for attributed string use
+  - `column.headerToolTip` is the standard way to add tooltips to NSTableColumn headers — much simpler than custom header cell subclasses
+  - The `column.title` string value is separate from `headerCell.attributedStringValue` — setting the attributed string overrides the visual display, but `.title` remains accessible for width measurement in `autoFitColumn` and `autoFitAllColumns`
+  - The thin space character `\u{2009}` combined with a regular space provides approximately 4pt of spacing between the icon attachment and column name text
+----
+
+## 2026-02-19 - US-013 - Refactor AppDelegate to use TabContext
+- TabContext class already existed from a prior iteration with `FileSession?`, `TableViewController?`, `emptyStateView`, and `isEmptyState` computed property
+- Added `containerView: NSView?` property to TabContext to track the top-level view for each tab (either the TVC view or the empty state view)
+- Updated `showEmptyState()` to remove old `containerView` before adding new one, and set `tab.containerView = emptyView`
+- Updated `showTableView()` to remove old `containerView` before adding new one, and set `tab.containerView = tvc.view`
+- All AppDelegate methods already reference `activeTab?.fileSession` and `activeTab?.tableViewController` — verified no direct references remain
+- The `tabs: [TabContext]` array and `activeTabIndex: Int` properties were already in place from a prior iteration
+- The `activeTab: TabContext?` computed property with bounds checking was already in place
+- Regenerated Gridka.xcodeproj via xcodegen (TabContext.swift was not included in previous project generation)
+- Files changed: Sources/Model/TabContext.swift, Sources/App/AppDelegate.swift, plans/prd.json
+- Build succeeds, all 64 tests pass
+- **Learnings for future iterations:**
+  - The Xcode project must be regenerated with `xcodegen generate` after adding new Swift files — without this, new files won't be compiled and you'll get "cannot find type in scope" errors
+  - TabContext's `containerView` is separate from `emptyStateView` and `tableViewController.view` — it always points to whichever view is currently the tab's top-level content. This abstraction makes tab switching simpler in US-014 since you just swap `containerView` in/out of the window
+  - SourceKit diagnostics in the IDE may show false positive "cannot find type" errors when the Xcode project has just been regenerated — these are not actual build errors, always verify with an actual `xcodebuild` invocation
+  - The `containerView?.removeFromSuperview()` call in both `showEmptyState()` and `showTableView()` ensures clean transitions — the old content is removed before the new content is added, preventing overlapping views
+----
+
+## 2026-02-19 - US-014 - Enable tab bar and multi-file opening
+- Replaced single `window: NSWindow!` property with `windowTabs: [NSWindow: TabContext]` dictionary — each "tab" is a separate NSWindow in a tab group
+- Added `createWindow()` factory that sets `tabbingMode = .preferred`, configures DragDropView as contentView, and sets the AppDelegate as NSWindowDelegate
+- `activeWindow` computed property returns `NSApp.keyWindow ?? NSApp.mainWindow ?? windowTabs.keys.first` for dynamic resolution of the current window
+- `activeTab` computed property looks up the TabContext for the active window from the `windowTabs` dictionary
+- File > Open (⌘O) now calls `openFileInNewTab()` which creates a new NSWindow and adds it to the tab group via `parentWindow.addTabbedWindow(newWin, ordered: .above)`
+- If the current tab is empty (no file loaded), the new file opens in-place instead of creating a new tab
+- Drag-and-drop on any window now opens the file in a new tab via `openFileInNewTab(url, relativeTo: win)` instead of replacing the current file
+- Each tab/window title shows just the filename (`url.lastPathComponent`) instead of "Gridka — filename"
+- `window.subtitle` shows the directory path (`url.deletingLastPathComponent().path`) for the active file
+- Tab reordering is handled natively by NSWindow tabbing — no custom code needed
+- `showEmptyState()` and `showTableView()` now take explicit `(in: NSWindow, tab: TabContext)` parameters instead of implicitly using `self.window`
+- `openFile()` now takes explicit `(at: URL, in: NSWindow, tab: TabContext)` parameters
+- Added `NSWindowDelegate` extension with `windowWillClose` to clean up `windowTabs` entries when a tab/window closes
+- All alert sheets (`beginSheetModal`) now use `activeWindow` instead of the old single `self.window` property
+- `onModifiedChanged` callback now captures `[weak win]` instead of `[weak self]` and updates `win?.isDocumentEdited` directly
+- Files changed: Sources/App/AppDelegate.swift, plans/prd.json
+- Build succeeds, all 64 tests pass
+- **Learnings for future iterations:**
+  - With NSWindow tabbing (`tabbingMode = .preferred`), each "tab" is actually a separate NSWindow in a tab group — the OS handles the tab bar UI, reordering, and switching automatically
+  - `NSApp.keyWindow` is the most reliable way to find the currently active window — it updates automatically when the user switches tabs or windows
+  - `addTabbedWindow(_:ordered:)` adds a new window to the same tab group — must be called on an existing window in the group, not on the new window
+  - `window.title` is used as the tab label text in the native macOS tab bar — setting it to just the filename gives clean tab labels
+  - `window.subtitle` is shown below the title in the title bar and is separate from the tab label — use it for the directory path
+  - The `onFileDrop` closure in DragDropView must capture `[weak win]` to know which window the drop occurred in, so the new tab can be added to the correct tab group
+  - `applicationShouldTerminateAfterLastWindowClosed` returns `true` to automatically quit when all windows/tabs are closed — standard macOS behavior
+  - The `windowWillClose` delegate method is critical for cleanup — without removing the TabContext from `windowTabs`, the DuckDB engine and FileSession would leak
+  - All `beginSheetModal(for:)` calls must use a dynamic window reference (not a stored property) since each tab has its own window
+----
+
+## 2026-02-19 - US-015 - Add tab lifecycle management
+- Added File > New Tab menu item with ⌘T shortcut that creates a new tab window showing the drag-drop empty state with title "Untitled"
+  - Creates a new NSWindow via `createWindow()`, registers a new TabContext in `windowTabs`, calls `showEmptyState`, and adds to the tab group via `addTabbedWindow(_:ordered:)`
+- ⌘W closes the active tab via `NSWindow.performClose(_:)` which triggers `windowShouldClose(_:)` delegate method
+- Implemented `windowShouldClose(_:)` on NSWindowDelegate to intercept close and check `isModified`
+  - If the closing tab has unsaved edits, shows a 3-button NSAlert: "Save", "Don't Save", "Cancel"
+  - Save button triggers `FileSession.save()` flow, then closes the window on success
+  - Don't Save closes the window immediately without saving
+  - Cancel aborts the close and keeps the window open
+- Added `windowsClosingAfterPrompt` Set<NSWindow> to prevent infinite recursion: when `windowShouldClose` returns false and later calls `sender.close()` programmatically, the set allows the second `windowShouldClose` call to return true immediately
+- Closing the last tab closes the window (standard macOS NSWindow tabbing behavior)
+- Tab cleanup happens via the existing `windowWillClose` delegate: removing the TabContext from `windowTabs` releases the TabContext → FileSession → DuckDBEngine chain, with DuckDBEngine.deinit calling `duckdb_disconnect` + `duckdb_close`
+- Changed "Close Window" menu item text to "Close Tab" for clarity
+- Files changed: Sources/App/AppDelegate.swift, plans/prd.json
+- Build succeeds, all 64 tests pass
+- **Learnings for future iterations:**
+  - `NSWindow.performClose(_:)` calls `windowShouldClose(_:)` delegate method — returning false blocks the close, allowing us to show a save prompt first
+  - When closing a window programmatically from within `windowShouldClose` (which returned false), calling `sender.close()` triggers `windowShouldClose` again — must use a bypass mechanism (Set of windows being closed) to prevent infinite recursion
+  - `NSApplication.ModalResponse.alertSecondButtonReturn` corresponds to the second button added via `addButton(withTitle:)` — buttons are indexed in order of addition
+  - The DuckDB engine cleanup chain is: TabContext deinit → FileSession deinit → DuckDBEngine deinit → duckdb_disconnect + duckdb_close. No explicit cleanup code needed since Swift ARC handles the release order
+  - NSWindow tabbing naturally handles closing the last tab = closing the window, with `applicationShouldTerminateAfterLastWindowClosed` quitting the app
+  - The `windowsClosingAfterPrompt` set uses `remove()` which returns the removed element or nil — this serves as an atomic check-and-clear operation
+----
+
+## 2026-02-19 - US-016 - Ensure tab state isolation and memory management
+- Verified existing tab state isolation: each TabContext already owns its own FileSession (with independent DuckDBEngine, serial DispatchQueue, RowCache, ViewState), and each TableViewController creates its own FilterBarView, SearchBarView, StatusBarView — no shared mutable state
+- Added `setMemoryLimit(_:)` method to DuckDBEngine that executes `SET memory_limit = 'X.XGB'` to dynamically adjust memory
+- Added `updateMemoryLimit(_:)` method to FileSession that delegates to engine on the serial query queue
+- Added `totalMemoryBudget` (50% of physical RAM) and `rebalanceMemoryLimits()` to AppDelegate — iterates all open tabs with active FileSessions and divides the budget equally among them
+- Memory rebalancing is triggered: (1) after a file's full load completes (new engine active), (2) when a tab/window closes (budget redistributed to remaining tabs)
+- Added 10-tab warning alert: when opening a 10th tab (via File > Open, drag-and-drop, or File > New Tab), shows an NSAlert warning "You have 10 tabs open. This may increase memory usage significantly. Continue?" with Continue and Cancel buttons
+- Refactored `openFileInNewTab` to use `createTabAndOpenFile` helper (extracted for reuse after async alert)
+- Refactored `newTabAction` to use `createEmptyTab` helper (extracted for reuse after async alert)
+- Tab switching remains a main-thread-only operation handled natively by NSWindow tabbing
+- Files changed: Sources/Engine/DuckDBEngine.swift, Sources/Model/FileSession.swift, Sources/App/AppDelegate.swift, plans/prd.json
+- Build succeeds, all 64 tests pass
+- **Learnings for future iterations:**
+  - DuckDB supports `SET memory_limit` dynamically at runtime — no need to restart the database or reconnect
+  - Each FileSession creates its own DuckDBEngine in init, and each DuckDBEngine opens its own in-memory database — tab isolation was already architectural from the start
+  - The `DispatchQueue(label: "com.gridka.query-queue")` label is the same string for all FileSessions, but each call to the DispatchQueue initializer creates a distinct queue instance — label is just for debugging
+  - Memory rebalancing divides `ProcessInfo.processInfo.physicalMemory / 2` by the number of active sessions — empty tabs (no FileSession) don't consume DuckDB memory so they're excluded from the count
+  - The 10-tab warning uses `tabCount >= 9` check (before the new tab is created) to trigger at the 10th tab — the alert message says `tabCount + 1` to show the count after creation
+  - `beginSheetModal` is async — the tab creation must happen in the completion handler, not after the alert call. This required extracting `createTabAndOpenFile` and `createEmptyTab` helper methods
+  - When changing `guard self != nil` to `guard let self = self` in a closure, all subsequent uses of `self?.method` must change to `self.method` — leaving `self?` causes a compile error since `self` is now non-optional
+----
