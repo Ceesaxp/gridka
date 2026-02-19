@@ -55,6 +55,10 @@ final class SettingsManager {
         }
         set {
             UserDefaults.standard.set(newValue, forKey: Keys.thousandsSeparator)
+            // Mutually exclusive: comma thousands separator conflicts with decimal comma
+            if newValue && useDecimalComma {
+                UserDefaults.standard.set(false, forKey: Keys.decimalComma)
+            }
             notifyChange()
         }
     }
@@ -65,6 +69,10 @@ final class SettingsManager {
         }
         set {
             UserDefaults.standard.set(newValue, forKey: Keys.decimalComma)
+            // Mutually exclusive: decimal comma conflicts with comma thousands separator
+            if newValue && useThousandsSeparator {
+                UserDefaults.standard.set(false, forKey: Keys.thousandsSeparator)
+            }
             notifyChange()
         }
     }

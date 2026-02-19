@@ -32,6 +32,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         return windowTabs.first(where: { $0.value === tab })?.key
     }
 
+    /// Finds the tab context that owns a given TableViewController.
+    private func tab(for tvc: TableViewController) -> TabContext? {
+        return windowTabs.values.first(where: { $0.tableViewController === tvc })
+    }
+
     // MARK: - Memory Rebalancing
 
     /// Rebalances DuckDB memory limits across all open tabs.
@@ -182,6 +187,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         addColumnItem.keyEquivalentModifierMask = [.command, .option]
         addColumnItem.target = self
         editMenu.addItem(addColumnItem)
+
+        let renameColumnItem = NSMenuItem(title: "Rename Column…", action: #selector(renameColumnAction(_:)), keyEquivalent: "")
+        renameColumnItem.target = self
+        editMenu.addItem(renameColumnItem)
+
+        let deleteColumnItem = NSMenuItem(title: "Delete Column", action: #selector(deleteColumnAction(_:)), keyEquivalent: "")
+        deleteColumnItem.target = self
+        editMenu.addItem(deleteColumnItem)
+
+        editMenu.addItem(NSMenuItem.separator())
 
         let addRowItem = NSMenuItem(title: "Add Row", action: #selector(addRowAction(_:)), keyEquivalent: "r")
         addRowItem.keyEquivalentModifierMask = [.command, .option]
@@ -588,20 +603,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             self?.handleSearchChanged(term)
         }
 
-        tvc.onCellEdited = { [weak self] rowid, columnName, newValue, displayRow in
-            self?.handleCellEdited(rowid: rowid, columnName: columnName, newValue: newValue, displayRow: displayRow)
+        tvc.onCellEdited = { [weak self, weak tvc] rowid, columnName, newValue, displayRow in
+            guard let self = self, let tvc = tvc, let tab = self.tab(for: tvc) else { return }
+            self.handleCellEdited(tab: tab, rowid: rowid, columnName: columnName, newValue: newValue, displayRow: displayRow)
         }
 
-        tvc.onColumnRenamed = { [weak self] oldName, newName in
-            self?.handleColumnRenamed(oldName: oldName, newName: newName)
+        tvc.onColumnRenamed = { [weak self, weak tvc] oldName, newName in
+            guard let self = self, let tvc = tvc, let tab = self.tab(for: tvc) else { return }
+            self.handleColumnRenamed(tab: tab, oldName: oldName, newName: newName)
         }
 
-        tvc.onColumnTypeChanged = { [weak self] columnName, duckDBType in
-            self?.handleColumnTypeChanged(columnName: columnName, duckDBType: duckDBType)
+        tvc.onColumnTypeChanged = { [weak self, weak tvc] columnName, duckDBType in
+            guard let self = self, let tvc = tvc, let tab = self.tab(for: tvc) else { return }
+            self.handleColumnTypeChanged(tab: tab, columnName: columnName, duckDBType: duckDBType)
         }
 
-        tvc.onColumnDeleted = { [weak self] columnName in
-            self?.handleColumnDeleted(columnName: columnName)
+        tvc.onColumnDeleted = { [weak self, weak tvc] columnName in
+            guard let self = self, let tvc = tvc, let tab = self.tab(for: tvc) else { return }
+            self.handleColumnDeleted(tab: tab, columnName: columnName)
         }
 
         tab.tableViewController = tvc
@@ -882,8 +901,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     // MARK: - Cell Edit Handling
 
-    private func handleCellEdited(rowid: Int64, columnName: String, newValue: String, displayRow: Int) {
-        guard let session = activeTab?.fileSession, let tvc = activeTab?.tableViewController else { return }
+    private func handleCellEdited(tab: TabContext, rowid: Int64, columnName: String, newValue: String, displayRow: Int) {
+        guard let session = tab.fileSession, let tvc = tab.tableViewController else { return }
 
         session.updateCell(rowid: rowid, column: columnName, value: newValue, displayRow: displayRow) { [weak self] result in
             switch result {
@@ -891,7 +910,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 // Re-fetch the page containing the edited row to show the updated value
                 let pageIndex = session.rowCache.pageIndex(forRow: displayRow)
                 session.fetchPage(index: pageIndex) { _ in
-                    tvc.reloadVisibleRows()
+                    // Use targeted reload to preserve scroll position and selection
+                    let rowSet = IndexSet(integer: displayRow)
+                    let colSet = IndexSet(integersIn: 0..<tvc.tableView.numberOfColumns)
+                    tvc.reloadRows(rowSet, columns: colSet)
                     tvc.updateDetailPane()
                 }
             case .failure(let error):
@@ -903,16 +925,71 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     // MARK: - Add Column
 
     @objc private func addColumnAction(_ sender: Any?) {
-        guard let session = activeTab?.fileSession, session.isFullyLoaded else { return }
-        guard let tvc = activeTab?.tableViewController else { return }
+        guard let tab = activeTab else { return }
+        guard let session = tab.fileSession, session.isFullyLoaded else { return }
+        guard let tvc = tab.tableViewController else { return }
 
         let existingNames = session.columns.map { $0.name }
         let sheetVC = AddColumnSheetController(existingColumns: existingNames)
         sheetVC.onAdd = { [weak self] name, duckDBType in
-            self?.handleAddColumn(name: name, duckDBType: duckDBType)
+            self?.handleAddColumn(tab: tab, name: name, duckDBType: duckDBType)
         }
 
         tvc.presentAsSheet(sheetVC)
+    }
+
+    // MARK: - Rename Column (from Edit menu)
+
+    @objc private func renameColumnAction(_ sender: Any?) {
+        guard let tab = activeTab else { return }
+        guard let session = tab.fileSession, session.isFullyLoaded else { return }
+        guard let tvc = tab.tableViewController else { return }
+        let columnName = tvc.selectedColumnName
+        guard !columnName.isEmpty, columnName != "_gridka_rowid" else { return }
+
+        let existingNames = session.columns.map { $0.name }
+        let renameVC = RenameColumnPopoverController(currentName: columnName, existingNames: existingNames)
+        renameVC.onRename = { [weak self] newName in
+            self?.handleColumnRenamed(tab: tab, oldName: columnName, newName: newName)
+        }
+
+        let popover = NSPopover()
+        popover.contentViewController = renameVC
+        popover.behavior = .transient
+        renameVC.popover = popover
+
+        // Show relative to the column header
+        if let headerView = tvc.tableView.headerView,
+           let colIndex = tvc.tableView.tableColumns.firstIndex(where: { $0.identifier.rawValue == columnName }) {
+            let headerRect = headerView.headerRect(ofColumn: colIndex)
+            popover.show(relativeTo: headerRect, of: headerView, preferredEdge: .maxY)
+        } else {
+            // Fallback: show as sheet
+            tvc.presentAsSheet(renameVC)
+        }
+    }
+
+    // MARK: - Delete Column (from Edit menu)
+
+    @objc private func deleteColumnAction(_ sender: Any?) {
+        guard let tab = activeTab else { return }
+        guard let session = tab.fileSession, session.isFullyLoaded else { return }
+        guard let tvc = tab.tableViewController else { return }
+        let columnName = tvc.selectedColumnName
+        guard !columnName.isEmpty, columnName != "_gridka_rowid" else { return }
+
+        let alert = NSAlert()
+        alert.messageText = "Delete column \"\(columnName)\"?"
+        alert.informativeText = "This cannot be undone."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Cancel")
+
+        guard let win = activeWindow else { return }
+        alert.beginSheetModal(for: win) { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            self?.handleColumnDeleted(tab: tab, columnName: columnName)
+        }
     }
 
     // MARK: - Add Row
@@ -1023,8 +1100,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
     }
 
-    private func handleAddColumn(name: String, duckDBType: String) {
-        guard let session = activeTab?.fileSession, let tvc = activeTab?.tableViewController else { return }
+    private func handleAddColumn(tab: TabContext, name: String, duckDBType: String) {
+        guard let session = tab.fileSession, let tvc = tab.tableViewController else { return }
 
         session.addColumn(name: name, duckDBType: duckDBType) { [weak self] result in
             switch result {
@@ -1047,8 +1124,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     // MARK: - Rename Column
 
-    private func handleColumnRenamed(oldName: String, newName: String) {
-        guard let session = activeTab?.fileSession, let tvc = activeTab?.tableViewController else { return }
+    private func handleColumnRenamed(tab: TabContext, oldName: String, newName: String) {
+        guard let session = tab.fileSession, let tvc = tab.tableViewController else { return }
 
         session.renameColumn(oldName: oldName, newName: newName) { [weak self] result in
             switch result {
@@ -1074,8 +1151,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     // MARK: - Change Column Type
 
-    private func handleColumnTypeChanged(columnName: String, duckDBType: String) {
-        guard let session = activeTab?.fileSession, let tvc = activeTab?.tableViewController else { return }
+    private func handleColumnTypeChanged(tab: TabContext, columnName: String, duckDBType: String) {
+        guard let session = tab.fileSession, let tvc = tab.tableViewController else { return }
 
         session.changeColumnType(columnName: columnName, newDuckDBType: duckDBType) { [weak self] result in
             switch result {
@@ -1101,8 +1178,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     // MARK: - Delete Column
 
-    private func handleColumnDeleted(columnName: String) {
-        guard let session = activeTab?.fileSession, let tvc = activeTab?.tableViewController else { return }
+    private func handleColumnDeleted(tab: TabContext, columnName: String) {
+        guard let session = tab.fileSession, let tvc = tab.tableViewController else { return }
 
         session.deleteColumn(name: columnName) { [weak self] result in
             switch result {
@@ -1200,6 +1277,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
         if menuItem.action == #selector(addColumnAction(_:)) {
             return session?.isFullyLoaded ?? false
+        }
+        if menuItem.action == #selector(renameColumnAction(_:)) {
+            guard session?.isFullyLoaded ?? false else {
+                menuItem.title = "Rename Column…"
+                return false
+            }
+            let col = tvc?.selectedColumnName ?? ""
+            if !col.isEmpty && col != "_gridka_rowid" {
+                menuItem.title = "Rename Column \"\(col)\"…"
+                return true
+            }
+            menuItem.title = "Rename Column…"
+            return false
+        }
+        if menuItem.action == #selector(deleteColumnAction(_:)) {
+            guard session?.isFullyLoaded ?? false else {
+                menuItem.title = "Delete Column"
+                return false
+            }
+            let col = tvc?.selectedColumnName ?? ""
+            if !col.isEmpty && col != "_gridka_rowid" {
+                menuItem.title = "Delete Column \"\(col)\""
+                return true
+            }
+            menuItem.title = "Delete Column"
+            return false
         }
         if menuItem.action == #selector(addRowAction(_:)) {
             return session?.isFullyLoaded ?? false
