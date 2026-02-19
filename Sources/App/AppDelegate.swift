@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// Used to bypass windowShouldClose when we've already handled the prompt.
     private var windowsClosingAfterPrompt: Set<NSWindow> = []
 
+
     /// Total memory budget for all DuckDB engines: 50% of physical RAM.
     private let totalMemoryBudget: UInt64 = ProcessInfo.processInfo.physicalMemory / 2
 
@@ -96,6 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             backing: .buffered,
             defer: false
         )
+        win.isReleasedWhenClosed = false
         win.title = "Gridka"
         win.center()
         win.minSize = NSSize(width: 600, height: 400)
@@ -1319,9 +1321,16 @@ extension AppDelegate: NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         guard let win = notification.object as? NSWindow else { return }
-        // Clean up the TabContext for this window.
-        // This releases the TabContext, which releases its FileSession,
-        // which releases the DuckDBEngine — calling duckdb_disconnect + duckdb_close in deinit.
+
+        // Disconnect all delegate/dataSource/target pointers immediately.
+        if let tab = windowTabs[win] {
+            tab.tableViewController?.tearDown()
+            tab.fileSession?.onModifiedChanged = nil
+        }
+
+        // Release the TabContext (and its FileSession, DuckDBEngine, etc.).
+        // The window itself is safe because isReleasedWhenClosed = false,
+        // so AppKit won't send an extra release that ARC doesn't expect.
         windowTabs.removeValue(forKey: win)
 
         // Rebalance memory limits among remaining tabs

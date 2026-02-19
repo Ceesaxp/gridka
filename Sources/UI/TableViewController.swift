@@ -267,6 +267,23 @@ final class TableViewController: NSViewController {
         }
     }
 
+    /// Disconnects all delegate/dataSource/target pointers so the view hierarchy
+    /// can be torn down safely after the TVC is released.
+    func tearDown() {
+        NotificationCenter.default.removeObserver(self)
+        cancelEdit()
+        tableView.dataSource = nil
+        tableView.delegate = nil
+        tableView.target = nil
+        tableView.doubleAction = nil
+        tableView.action = nil
+        tableView.menu?.delegate = nil
+        tableView.headerView?.menu?.delegate = nil
+        splitView.delegate = nil
+        fileSession = nil
+        view.removeFromSuperview()
+    }
+
     deinit {
         NotificationCenter.default.removeObserver(self)
     }
