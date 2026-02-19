@@ -137,6 +137,14 @@ final class DuckDBEngine {
         return DuckDBResult(result)
     }
 
+    /// Updates the DuckDB memory limit for this engine instance.
+    /// Called by TabMemoryManager when tabs are opened or closed.
+    func setMemoryLimit(_ limitBytes: UInt64) throws {
+        let limitGB = Double(limitBytes) / (1024.0 * 1024.0 * 1024.0)
+        let limitStr = String(format: "%.1fGB", limitGB)
+        try execute("SET memory_limit = '\(limitStr)'")
+    }
+
     // MARK: - Private
 
     private func configureDatabaseSettings() throws {
