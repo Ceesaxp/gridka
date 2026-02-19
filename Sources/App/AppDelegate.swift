@@ -144,6 +144,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         toggleRowNumbersItem.target = self
         viewMenu.addItem(toggleRowNumbersItem)
 
+        viewMenu.addItem(NSMenuItem.separator())
+
+        let delimiterItem = NSMenuItem(title: "Delimiter", action: nil, keyEquivalent: "")
+        let delimiterMenu = NSMenu()
+        for (title, delim) in [("Auto-detect", ""), ("Comma (,)", ","), ("Tab (⇥)", "\t"),
+                                ("Semicolon (;)", ";"), ("Pipe (|)", "|"), ("Tilde (~)", "~")] {
+            let item = NSMenuItem(title: title, action: #selector(changeDelimiterAction(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = delim
+            delimiterMenu.addItem(item)
+        }
+        delimiterMenu.addItem(NSMenuItem.separator())
+        let customItem = NSMenuItem(title: "Custom…", action: #selector(customDelimiterAction(_:)), keyEquivalent: "")
+        customItem.target = self
+        delimiterMenu.addItem(customItem)
+        delimiterItem.submenu = delimiterMenu
+        viewMenu.addItem(delimiterItem)
+
         viewMenuItem.submenu = viewMenu
         mainMenu.addItem(viewMenuItem)
 
@@ -453,6 +471,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         tableViewController?.toggleRowNumbers()
     }
 
+    // MARK: - Delimiter
+
+    @objc private func changeDelimiterAction(_ sender: NSMenuItem) {
+        guard let delim = sender.representedObject as? String else { return }
+        let newDelimiter: String? = delim.isEmpty ? nil : delim
+        reloadWithDelimiter(newDelimiter)
+    }
+
+    @objc private func customDelimiterAction(_ sender: Any?) {
+        let alert = NSAlert()
+        alert.messageText = "Custom Delimiter"
+        alert.informativeText = "Enter a single character to use as the column delimiter:"
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Cancel")
+
+        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
+        input.placeholderString = "e.g. ~ or | or ;"
+        alert.accessoryView = input
+
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            let text = input.stringValue
+            guard !text.isEmpty else { return }
+            // Use the first character (or the full string for multi-char delimiters)
+            self?.reloadWithDelimiter(text)
+        }
+    }
+
+    private func reloadWithDelimiter(_ delimiter: String?) {
+        guard let session = fileSession, let tvc = tableViewController else { return }
+        guard session.isFullyLoaded else { return }
+
+        tvc.statusBar.updateProgress(0)
+
+        session.reload(withDelimiter: delimiter, progress: { [weak self] fraction in
+            self?.tableViewController?.statusBar.updateProgress(fraction)
+        }, completion: { [weak self] result in
+            guard let self = self, let tvc = self.tableViewController else { return }
+            switch result {
+            case .success(let totalRows):
+                tvc.statusBar.updateProgress(1.0)
+                tvc.statusBar.updateRowCount(showing: totalRows, total: totalRows)
+                tvc.statusBar.updateDelimiter(session.effectiveDelimiter)
+                tvc.fileSession = session
+                tvc.configureColumns(session.columns)
+                tvc.autoFitAllColumns()
+            case .failure(let error):
+                tvc.statusBar.updateProgress(1.0)
+                self.showError(error, context: "reloading with delimiter")
+            }
+        })
+    }
+
     // MARK: - Search Handling
 
     @objc private func performFind(_ sender: Any?) {
@@ -522,6 +593,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         if menuItem.action == #selector(toggleRowNumbersAction(_:)) {
             menuItem.state = (tableViewController?.isRowNumbersVisible ?? false) ? .on : .off
             return tableViewController != nil
+        }
+        if menuItem.action == #selector(changeDelimiterAction(_:)) {
+            guard let delim = menuItem.representedObject as? String else { return false }
+            let effective = fileSession?.customDelimiter
+            if delim.isEmpty {
+                // "Auto-detect" is checked when no custom delimiter is set
+                menuItem.state = (effective == nil) ? .on : .off
+            } else {
+                menuItem.state = (effective == delim) ? .on : .off
+            }
+            return fileSession?.isFullyLoaded ?? false
+        }
+        if menuItem.action == #selector(customDelimiterAction(_:)) {
+            // Check if current delimiter is a custom one not in the standard list
+            if let effective = fileSession?.customDelimiter,
+               ![",", "\t", ";", "|", "~"].contains(effective) {
+                menuItem.state = .on
+            } else {
+                menuItem.state = .off
+            }
+            return fileSession?.isFullyLoaded ?? false
         }
         return true
     }

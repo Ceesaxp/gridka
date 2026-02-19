@@ -23,8 +23,15 @@ final class FileSession {
     private(set) var detectedHasHeader: Bool = true
     /// User-togglable header setting. Initialized from sniff result.
     var hasHeaders: Bool = true
+    /// User-selected delimiter override. nil = auto-detect.
+    var customDelimiter: String? = nil
     /// Detected file encoding.
     private(set) var detectedEncoding: String = "UTF-8"
+
+    /// The effective delimiter: custom override or detected value.
+    var effectiveDelimiter: String {
+        return customDelimiter ?? detectedDelimiter
+    }
 
     // MARK: - Init
 
@@ -98,12 +105,21 @@ final class FileSession {
         }
     }
 
+    /// Builds the read_csv_auto parameter string with current header/delimiter settings.
+    private func csvReadParams() -> String {
+        var params = "ignore_errors = true, header = \(hasHeaders ? "true" : "false")"
+        if let delim = customDelimiter {
+            let escaped = delim.replacingOccurrences(of: "'", with: "''")
+            params += ", delim = '\(escaped)'"
+        }
+        return params
+    }
+
     // MARK: - Preview Loading
 
     func loadPreview(completion: @escaping (Result<[ColumnDescriptor], Error>) -> Void) {
         let path = filePath.path.replacingOccurrences(of: "'", with: "''")
-        let headerParam = hasHeaders ? "true" : "false"
-        let sql = "SELECT * FROM read_csv_auto('\(path)', ignore_errors = true, header = \(headerParam)) LIMIT 1000"
+        let sql = "SELECT * FROM read_csv_auto('\(path)', \(csvReadParams())) LIMIT 1000"
 
         queryQueue.async { [weak self] in
             guard let self = self else { return }
@@ -130,8 +146,7 @@ final class FileSession {
 
     func loadFull(progress: @escaping (Double) -> Void, completion: @escaping (Result<Int, Error>) -> Void) {
         let path = filePath.path.replacingOccurrences(of: "'", with: "''")
-        let headerParam = hasHeaders ? "true" : "false"
-        let createSQL = "CREATE TABLE data AS SELECT row_number() OVER () AS _gridka_rowid, * FROM read_csv_auto('\(path)', ignore_errors = true, header = \(headerParam))"
+        let createSQL = "CREATE TABLE data AS SELECT row_number() OVER () AS _gridka_rowid, * FROM read_csv_auto('\(path)', \(csvReadParams()))"
         let countSQL = "SELECT COUNT(*) FROM data"
 
         queryQueue.async { [weak self] in
@@ -216,10 +231,18 @@ final class FileSession {
 
     func reload(withHeaders: Bool, progress: @escaping (Double) -> Void, completion: @escaping (Result<Int, Error>) -> Void) {
         hasHeaders = withHeaders
+        reloadTable(progress: progress, completion: completion)
+    }
+
+    func reload(withDelimiter delimiter: String?, progress: @escaping (Double) -> Void, completion: @escaping (Result<Int, Error>) -> Void) {
+        customDelimiter = delimiter
+        reloadTable(progress: progress, completion: completion)
+    }
+
+    private func reloadTable(progress: @escaping (Double) -> Void, completion: @escaping (Result<Int, Error>) -> Void) {
         let path = filePath.path.replacingOccurrences(of: "'", with: "''")
-        let headerParam = hasHeaders ? "true" : "false"
         let dropSQL = "DROP TABLE IF EXISTS data"
-        let createSQL = "CREATE TABLE data AS SELECT row_number() OVER () AS _gridka_rowid, * FROM read_csv_auto('\(path)', ignore_errors = true, header = \(headerParam))"
+        let createSQL = "CREATE TABLE data AS SELECT row_number() OVER () AS _gridka_rowid, * FROM read_csv_auto('\(path)', \(csvReadParams()))"
         let countSQL = "SELECT COUNT(*) FROM data"
 
         queryQueue.async { [weak self] in
