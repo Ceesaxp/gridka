@@ -55,9 +55,37 @@ final class TableViewController: NSViewController {
     /// Whether the detail pane is visible.
     private var isDetailPaneVisible = true
 
+    /// Currently highlighted cell view for visual feedback.
+    private weak var highlightedCellView: NSView?
+
+    /// The active inline edit text field, if any.
+    private var editField: NSTextField?
+    /// The row being edited.
+    private var editingRow: Int = -1
+    /// The column name being edited.
+    private var editingColumnName: String = ""
+
+    /// Called when a cell edit is committed. Parameters: (rowid, columnName, newValue, displayRow).
+    var onCellEdited: ((Int64, String, String, Int) -> Void)?
+
+    /// Called when a column is renamed via the header context menu. Parameters: (oldName, newName).
+    var onColumnRenamed: ((String, String) -> Void)?
+
+    /// Called when a column type is changed via the header context menu. Parameters: (columnName, newDuckDBType).
+    var onColumnTypeChanged: ((String, String) -> Void)?
+
+    /// Called when a column is deleted via the header context menu. Parameter: columnName.
+    var onColumnDeleted: ((String) -> Void)?
+
+    /// Row number gutter view.
+    private var rowNumberView: RowNumberView?
+    /// Whether row numbers are visible.
+    private(set) var isRowNumbersVisible = false
+    private static let rowNumberGutterWidth: CGFloat = 50
+
     // MARK: - Number Formatters
 
-    private static let integerFormatter: NumberFormatter = {
+    private var integerFormatter: NumberFormatter = {
         let f = NumberFormatter()
         f.numberStyle = .decimal
         f.maximumFractionDigits = 0
@@ -65,12 +93,26 @@ final class TableViewController: NSViewController {
         return f
     }()
 
-    private static let floatFormatter: NumberFormatter = {
+    private var floatFormatter: NumberFormatter = {
         let f = NumberFormatter()
         f.numberStyle = .decimal
         f.minimumFractionDigits = 2
         f.maximumFractionDigits = 2
         f.usesGroupingSeparator = true
+        return f
+    }()
+
+    private var dateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    /// Input formatter to parse dates from DuckDB's ISO format.
+    private static let isoDateParser: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "en_US_POSIX")
         return f
     }()
 
@@ -87,7 +129,7 @@ final class TableViewController: NSViewController {
         tableView.usesAlternatingRowBackgroundColors = true
         tableView.allowsColumnReordering = true
         tableView.allowsColumnResizing = true
-        tableView.allowsMultipleSelection = false
+        tableView.allowsMultipleSelection = true
         tableView.columnAutoresizingStyle = .noColumnAutoresizing
         tableView.rowHeight = 20
         tableView.intercellSpacing = NSSize(width: 8, height: 2)
@@ -112,6 +154,7 @@ final class TableViewController: NSViewController {
         // Single-click selects a row, then we track column via click
         tableView.target = self
         tableView.action = #selector(tableViewClicked(_:))
+        tableView.doubleAction = #selector(tableViewDoubleClicked(_:))
 
         scrollView = NSScrollView()
         scrollView.documentView = tableView
@@ -172,6 +215,39 @@ final class TableViewController: NSViewController {
             name: NSView.boundsDidChangeNotification,
             object: scrollView.contentView
         )
+
+        // Observe settings changes to update formatters
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(settingsDidChange(_:)),
+            name: SettingsManager.settingsChangedNotification,
+            object: nil
+        )
+        updateFormattersFromSettings()
+    }
+
+    @objc private func settingsDidChange(_ notification: Notification) {
+        updateFormattersFromSettings()
+        reloadVisibleRows()
+    }
+
+    private func updateFormattersFromSettings() {
+        let settings = SettingsManager.shared
+
+        integerFormatter.usesGroupingSeparator = settings.useThousandsSeparator
+        floatFormatter.usesGroupingSeparator = settings.useThousandsSeparator
+
+        if settings.useDecimalComma {
+            let locale = Locale(identifier: "de_DE")
+            integerFormatter.locale = locale
+            floatFormatter.locale = locale
+        } else {
+            let locale = Locale(identifier: "en_US")
+            integerFormatter.locale = locale
+            floatFormatter.locale = locale
+        }
+
+        dateFormatter.dateFormat = settings.dateFormat.rawValue
     }
 
     override func viewDidLayout() {
@@ -189,6 +265,23 @@ final class TableViewController: NSViewController {
                 }
             }
         }
+    }
+
+    /// Disconnects all delegate/dataSource/target pointers so the view hierarchy
+    /// can be torn down safely after the TVC is released.
+    func tearDown() {
+        NotificationCenter.default.removeObserver(self)
+        cancelEdit()
+        tableView.dataSource = nil
+        tableView.delegate = nil
+        tableView.target = nil
+        tableView.doubleAction = nil
+        tableView.action = nil
+        tableView.menu?.delegate = nil
+        tableView.headerView?.menu?.delegate = nil
+        splitView.delegate = nil
+        fileSession = nil
+        view.removeFromSuperview()
     }
 
     deinit {
@@ -236,20 +329,19 @@ final class TableViewController: NSViewController {
         for tableColumn in tableView.tableColumns {
             let columnName = tableColumn.identifier.rawValue
             guard let descriptor = session.columns.first(where: { $0.name == columnName }) else { continue }
-            let typeStr = typeLabel(for: descriptor.displayType)
 
+            var sortSuffix = ""
             if let sortIndex = sortColumns.firstIndex(where: { $0.column == columnName }) {
                 let sort = sortColumns[sortIndex]
                 let arrow = sort.direction == .ascending ? "\u{25B2}" : "\u{25BC}"
                 if isMultiSort {
-                    tableColumn.title = "\(descriptor.name) (\(typeStr)) \(sortIndex + 1)\(arrow)"
+                    sortSuffix = "\(sortIndex + 1)\(arrow)"
                 } else {
-                    tableColumn.title = "\(descriptor.name) (\(typeStr)) \(arrow)"
+                    sortSuffix = arrow
                 }
-            } else {
-                tableColumn.title = "\(descriptor.name) (\(typeStr))"
             }
-            styleHeaderCell(tableColumn.headerCell, descriptor: descriptor)
+
+            styleHeaderCell(tableColumn.headerCell, descriptor: descriptor, sortSuffix: sortSuffix)
         }
     }
 
@@ -322,9 +414,56 @@ final class TableViewController: NSViewController {
         tableView.scrollRowToVisible(targetRow)
     }
 
+    // MARK: - Row Numbers
+
+    func toggleRowNumbers() {
+        isRowNumbersVisible.toggle()
+        if isRowNumbersVisible {
+            showRowNumbers()
+        } else {
+            hideRowNumbers()
+        }
+    }
+
+    private func showRowNumbers() {
+        let gutterWidth = TableViewController.rowNumberGutterWidth
+        scrollView.contentInsets.left = gutterWidth
+
+        // Position below the header, aligned with the clip view
+        let clipFrame = scrollView.contentView.frame
+        let rnView = RowNumberView(frame: NSRect(
+            x: 0,
+            y: clipFrame.origin.y,
+            width: gutterWidth,
+            height: clipFrame.height
+        ))
+        rnView.autoresizingMask = [.height]
+        rnView.tableView = tableView
+        rnView.onRowClicked = { [weak self] row in
+            self?.tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        }
+        scrollView.addSubview(rnView)
+        rowNumberView = rnView
+        rnView.updateVisibleRows()
+    }
+
+    private func hideRowNumbers() {
+        scrollView.contentInsets.left = 0
+        rowNumberView?.removeFromSuperview()
+        rowNumberView = nil
+    }
+
     // MARK: - Scroll Pre-fetching
 
     @objc private func scrollViewBoundsDidChange(_ notification: Notification) {
+        // Dismiss any active inline edit when scrolling
+        if editField != nil {
+            cancelEdit()
+        }
+        clearHighlightIfNeeded()
+        if isRowNumbersVisible {
+            rowNumberView?.updateVisibleRows()
+        }
         guard let session = fileSession, session.isFullyLoaded else { return }
 
         let visibleRange = tableView.rows(in: tableView.visibleRect)
@@ -380,7 +519,7 @@ final class TableViewController: NSViewController {
         }
     }
 
-    private func updateDetailPane() {
+    func updateDetailPane() {
         guard let session = fileSession,
               selectedRow >= 0,
               !selectedColumnName.isEmpty else {
@@ -407,9 +546,214 @@ final class TableViewController: NSViewController {
 
         guard clickedRow >= 0, clickedCol >= 0, clickedCol < tableView.numberOfColumns else { return }
 
+        // Dismiss any active edit if the click is outside the editing cell
+        if editField != nil {
+            cancelEdit()
+        }
+
         selectedRow = clickedRow
         selectedColumnName = tableView.tableColumns[clickedCol].identifier.rawValue
+        updateCellHighlight(row: clickedRow, column: clickedCol)
         updateDetailPane()
+        statusBar.updateCellLocation(row: clickedRow, columnName: selectedColumnName)
+    }
+
+    @objc private func tableViewDoubleClicked(_ sender: Any?) {
+        let clickedRow = tableView.clickedRow
+        let clickedCol = tableView.clickedColumn
+
+        guard clickedRow >= 0, clickedCol >= 0, clickedCol < tableView.numberOfColumns else { return }
+        guard let session = fileSession, session.isFullyLoaded else { return }
+
+        let columnName = tableView.tableColumns[clickedCol].identifier.rawValue
+
+        // Don't allow editing the _gridka_rowid column
+        guard columnName != "_gridka_rowid" else { return }
+
+        beginEditing(row: clickedRow, column: clickedCol, columnName: columnName)
+    }
+
+    // MARK: - Inline Cell Editing
+
+    /// Public entry point for starting inline editing on a specific cell.
+    /// Called by AppDelegate after adding a new row to auto-enter edit mode.
+    func beginEditingCell(row: Int, column: Int, columnName: String) {
+        beginEditing(row: row, column: column, columnName: columnName)
+    }
+
+    private func beginEditing(row: Int, column: Int, columnName: String) {
+        // Cancel any existing edit
+        cancelEdit()
+
+        guard let session = fileSession else { return }
+
+        // Get the raw value for pre-populating the edit field
+        let rawValue: String
+        if let value = session.rowCache.value(forRow: row, columnName: columnName) {
+            switch value {
+            case .null:
+                rawValue = ""
+            default:
+                rawValue = value.description
+            }
+        } else {
+            // Cache miss — can't edit without data
+            return
+        }
+
+        editingRow = row
+        editingColumnName = columnName
+
+        // Get the cell frame in table view coordinates
+        let cellFrame = tableView.frameOfCell(atColumn: column, row: row)
+
+        // Create edit field
+        let field = NSTextField()
+        field.stringValue = rawValue
+        field.isBordered = false
+        field.drawsBackground = true
+        field.backgroundColor = .controlBackgroundColor
+        field.font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+        field.isEditable = true
+        field.isSelectable = true
+        field.focusRingType = .exterior
+        field.cell?.wraps = false
+        field.cell?.isScrollable = true
+        field.delegate = self
+        field.frame = cellFrame
+
+        // Match alignment with the cell
+        let descriptor = session.columns.first(where: { $0.name == columnName })
+        let isNumeric = descriptor?.displayType == .integer || descriptor?.displayType == .float
+        field.alignment = isNumeric ? .right : .left
+
+        tableView.addSubview(field)
+        field.selectText(nil)
+        view.window?.makeFirstResponder(field)
+
+        editField = field
+    }
+
+    private func commitEdit() {
+        guard let field = editField, let session = fileSession else { return }
+        let newValue = field.stringValue
+        let columnName = editingColumnName
+        let displayRow = editingRow
+
+        // Get the _gridka_rowid for this row
+        guard let rowidValue = session.rowCache.value(forRow: displayRow, columnName: "_gridka_rowid"),
+              case .integer(let rowid) = rowidValue else {
+            cancelEdit()
+            return
+        }
+
+        // Remove the edit field
+        field.removeFromSuperview()
+        editField = nil
+        editingRow = -1
+        editingColumnName = ""
+
+        // Fire the callback to perform the UPDATE
+        onCellEdited?(rowid, columnName, newValue, displayRow)
+    }
+
+    func cancelEdit() {
+        guard let field = editField else { return }
+        field.removeFromSuperview()
+        editField = nil
+        editingRow = -1
+        editingColumnName = ""
+    }
+
+    /// Direction for Tab/Shift+Tab cell navigation.
+    private enum EditMoveDirection {
+        case forward
+        case backward
+    }
+
+    /// Commits the current edit and moves to the next/previous editable cell.
+    private func commitEditAndMove(direction: EditMoveDirection) {
+        guard editField != nil, let session = fileSession else { return }
+
+        let currentRow = editingRow
+        let currentColumnName = editingColumnName
+
+        // Commit the current edit
+        commitEdit()
+
+        // Find the current column index in the table view
+        guard let colIndex = tableView.tableColumns.firstIndex(where: { $0.identifier.rawValue == currentColumnName }) else { return }
+
+        let columnCount = tableView.numberOfColumns
+        let rowCount = session.viewState.totalFilteredRows
+        guard columnCount > 0, rowCount > 0 else { return }
+
+        // Build list of editable column indices (skip _gridka_rowid)
+        let editableColumns: [Int] = (0..<columnCount).filter { i in
+            tableView.tableColumns[i].identifier.rawValue != "_gridka_rowid"
+        }
+        guard !editableColumns.isEmpty else { return }
+
+        // Find position in editable columns list
+        guard let editableIndex = editableColumns.firstIndex(of: colIndex) else { return }
+
+        var nextRow = currentRow
+        var nextEditableIndex = editableIndex
+
+        switch direction {
+        case .forward:
+            nextEditableIndex += 1
+            if nextEditableIndex >= editableColumns.count {
+                // Wrap to first editable column of next row
+                nextEditableIndex = 0
+                nextRow += 1
+                if nextRow >= rowCount { return } // At the very end, stop
+            }
+        case .backward:
+            nextEditableIndex -= 1
+            if nextEditableIndex < 0 {
+                // Wrap to last editable column of previous row
+                nextEditableIndex = editableColumns.count - 1
+                nextRow -= 1
+                if nextRow < 0 { return } // At the very beginning, stop
+            }
+        }
+
+        let nextCol = editableColumns[nextEditableIndex]
+        let nextColumnName = tableView.tableColumns[nextCol].identifier.rawValue
+
+        // Scroll to make the target cell visible
+        tableView.scrollRowToVisible(nextRow)
+        tableView.scrollColumnToVisible(nextCol)
+
+        // Begin editing the next cell (dispatch to let the scroll settle)
+        DispatchQueue.main.async { [weak self] in
+            self?.beginEditing(row: nextRow, column: nextCol, columnName: nextColumnName)
+        }
+    }
+
+    private func updateCellHighlight(row: Int, column: Int) {
+        // Clear previous highlight
+        if let prev = highlightedCellView {
+            prev.layer?.borderWidth = 0
+            prev.layer?.borderColor = nil
+        }
+
+        // Apply new highlight — use a border so it's visible over row selection
+        guard let cellView = tableView.view(atColumn: column, row: row, makeIfNecessary: false) else { return }
+        cellView.wantsLayer = true
+        cellView.layer?.borderWidth = 2
+        cellView.layer?.borderColor = NSColor.controlAccentColor.cgColor
+        highlightedCellView = cellView
+    }
+
+    /// Clears highlight when the highlighted cell is scrolled out of view.
+    func clearHighlightIfNeeded() {
+        if let prev = highlightedCellView {
+            prev.layer?.borderWidth = 0
+            prev.layer?.borderColor = nil
+            highlightedCellView = nil
+        }
     }
 
     // MARK: - Copy Operations
@@ -651,32 +995,102 @@ final class TableViewController: NSViewController {
         }
     }
 
+    /// Returns the SF Symbol name for a given display type.
+    private func typeIconName(for displayType: DisplayType) -> String {
+        switch displayType {
+        case .text:     return "textformat"
+        case .integer:  return "number"
+        case .float:    return "textformat.123"
+        case .date:     return "calendar"
+        case .boolean:  return "checkmark.circle"
+        case .unknown:  return "questionmark.circle"
+        }
+    }
+
+    /// Returns the full DuckDB type name for tooltip display.
+    private func duckDBTypeName(for descriptor: ColumnDescriptor) -> String {
+        switch descriptor.duckDBType {
+        case .varchar:    return "VARCHAR"
+        case .integer:    return "INTEGER"
+        case .bigint:     return "BIGINT"
+        case .double:     return "DOUBLE"
+        case .float:      return "FLOAT"
+        case .boolean:    return "BOOLEAN"
+        case .date:       return "DATE"
+        case .timestamp:  return "TIMESTAMP"
+        case .blob:       return "BLOB"
+        case .unknown:    return "UNKNOWN"
+        }
+    }
+
+    /// Builds an attributed string with a type icon followed by the column name.
+    private func buildHeaderAttributedString(columnName: String, descriptor: ColumnDescriptor, sortSuffix: String = "") -> NSAttributedString {
+        let result = NSMutableAttributedString()
+
+        // Add SF Symbol icon
+        let iconName = typeIconName(for: descriptor.displayType)
+        let symbolConfig = NSImage.SymbolConfiguration(pointSize: 10, weight: .regular)
+        if let image = NSImage(systemSymbolName: iconName, accessibilityDescription: typeLabel(for: descriptor.displayType)) {
+            let configuredImage = image.withSymbolConfiguration(symbolConfig) ?? image
+            let tintedImage = configuredImage.tinted(with: .secondaryLabelColor)
+            let attachment = NSTextAttachment()
+            attachment.image = tintedImage
+            // Adjust vertical alignment: shift the icon down slightly to align with text baseline
+            let iconSize = tintedImage.size
+            attachment.bounds = CGRect(x: 0, y: -1, width: iconSize.width, height: iconSize.height)
+            result.append(NSAttributedString(attachment: attachment))
+        }
+
+        // 4pt spacing between icon and column name
+        result.append(NSAttributedString(string: "\u{2009} ")) // thin space + regular space ≈ 4pt
+
+        // Column name (uppercased)
+        result.append(NSAttributedString(string: columnName.uppercased()))
+
+        // Sort suffix (e.g., " ▲" or " 1▲")
+        if !sortSuffix.isEmpty {
+            result.append(NSAttributedString(string: " \(sortSuffix)"))
+        }
+
+        return result
+    }
+
     private func makeTableColumn(for descriptor: ColumnDescriptor) -> NSTableColumn {
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(descriptor.name))
-        column.title = "\(descriptor.name) (\(typeLabel(for: descriptor.displayType)))"
+        column.title = descriptor.name.uppercased() // plain title for internal use
         column.width = widthForColumn(descriptor)
         column.minWidth = 50
         column.maxWidth = 2000
+
+        // Set tooltip to full DuckDB type name
+        column.headerToolTip = duckDBTypeName(for: descriptor)
 
         styleHeaderCell(column.headerCell, descriptor: descriptor)
 
         return column
     }
 
-    /// Applies bold font and numeric right-alignment to a header cell via attributed string.
-    private func styleHeaderCell(_ headerCell: NSTableHeaderCell, descriptor: ColumnDescriptor) {
+    /// Applies bold font, type icon, and numeric right-alignment to a header cell via attributed string.
+    private func styleHeaderCell(_ headerCell: NSTableHeaderCell, descriptor: ColumnDescriptor, sortSuffix: String = "") {
         let isNumeric = descriptor.displayType == .integer || descriptor.displayType == .float
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.alignment = isNumeric ? .right : .left
         paragraphStyle.lineBreakMode = .byTruncatingTail
 
-        headerCell.attributedStringValue = NSAttributedString(
-            string: headerCell.stringValue,
-            attributes: [
-                .font: NSFont.boldSystemFont(ofSize: NSFont.smallSystemFontSize),
-                .paragraphStyle: paragraphStyle,
-            ]
+        let attrStr = buildHeaderAttributedString(
+            columnName: descriptor.name,
+            descriptor: descriptor,
+            sortSuffix: sortSuffix
         )
+
+        // Apply bold font and paragraph style to the full string
+        let styled = NSMutableAttributedString(attributedString: attrStr)
+        styled.addAttributes([
+            .font: NSFont.boldSystemFont(ofSize: NSFont.smallSystemFontSize),
+            .paragraphStyle: paragraphStyle,
+        ], range: NSRange(location: 0, length: styled.length))
+
+        headerCell.attributedStringValue = styled
     }
 
     private func widthForColumn(_ descriptor: ColumnDescriptor) -> CGFloat {
@@ -704,17 +1118,69 @@ final class TableViewController: NSViewController {
             attrs[.foregroundColor] = NSColor.tertiaryLabelColor
             return NSAttributedString(string: "NULL", attributes: attrs)
         case .integer(let v):
-            let text = TableViewController.integerFormatter.string(from: NSNumber(value: v)) ?? String(v)
+            let text = integerFormatter.string(from: NSNumber(value: v)) ?? String(v)
             return NSAttributedString(string: text, attributes: attrs)
         case .double(let v):
-            let text = TableViewController.floatFormatter.string(from: NSNumber(value: v)) ?? String(v)
+            let text = floatFormatter.string(from: NSNumber(value: v)) ?? String(v)
             return NSAttributedString(string: text, attributes: attrs)
         case .boolean(let v):
             return NSAttributedString(string: v ? "true" : "false", attributes: attrs)
         case .date(let v):
+            // Re-format date according to user settings
+            if let parsed = TableViewController.isoDateParser.date(from: v) {
+                return NSAttributedString(string: dateFormatter.string(from: parsed), attributes: attrs)
+            }
             return NSAttributedString(string: v, attributes: attrs)
         case .string(let v):
             return NSAttributedString(string: v, attributes: attrs)
+        }
+    }
+
+    /// Identifier for the edited-cell dot layer.
+    private static let editedDotLayerName = "editedCellDot"
+
+    /// Adds or removes a small colored dot in the top-right corner of a cell
+    /// to indicate that the cell has been edited since the last save.
+    private func updateEditedDot(on cell: NSTextField, row: Int, columnName: String, session: FileSession) {
+        let existingDot = cell.layer?.sublayers?.first(where: { $0.name == TableViewController.editedDotLayerName })
+
+        // Check if this cell is edited by looking up the rowid
+        var isEdited = false
+        if !session.editedCells.isEmpty,
+           let rowidValue = session.rowCache.value(forRow: row, columnName: "_gridka_rowid"),
+           case .integer(let rowid) = rowidValue {
+            isEdited = session.editedCells.contains(EditedCell(rowid: rowid, column: columnName))
+        }
+
+        if isEdited {
+            let dotSize: CGFloat = 3
+            if let dot = existingDot {
+                // Reposition the existing dot (in case cell was resized)
+                dot.frame = CGRect(
+                    x: cell.bounds.width - dotSize - 2,
+                    y: 2,
+                    width: dotSize,
+                    height: dotSize
+                )
+            } else {
+                let dot = CALayer()
+                dot.name = TableViewController.editedDotLayerName
+                dot.backgroundColor = NSColor.controlAccentColor.cgColor
+                dot.cornerRadius = 1.5
+                // Position in top-right corner. In a flipped coordinate system
+                // (NSTableView cells), y=0 is top, so use y=2 for top-right.
+                dot.frame = CGRect(
+                    x: cell.bounds.width - dotSize - 2,
+                    y: 2,
+                    width: dotSize,
+                    height: dotSize
+                )
+                // Auto-resize to stay in top-right when cell width changes
+                dot.autoresizingMask = [.layerMinXMargin]
+                cell.layer?.addSublayer(dot)
+            }
+        } else {
+            existingDot?.removeFromSuperlayer()
         }
     }
 
@@ -740,6 +1206,36 @@ final class TableViewController: NSViewController {
                 break
             }
         }
+    }
+}
+
+// MARK: - NSTextFieldDelegate (Inline Cell Editing)
+
+extension TableViewController: NSTextFieldDelegate {
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+            // Enter — commit the edit
+            commitEdit()
+            return true
+        }
+        if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+            // Escape — cancel the edit
+            cancelEdit()
+            view.window?.makeFirstResponder(tableView)
+            return true
+        }
+        if commandSelector == #selector(NSResponder.insertTab(_:)) {
+            // Tab — commit and move to next cell
+            commitEditAndMove(direction: .forward)
+            return true
+        }
+        if commandSelector == #selector(NSResponder.insertBacktab(_:)) {
+            // Shift+Tab — commit and move to previous cell
+            commitEditAndMove(direction: .backward)
+            return true
+        }
+        return false
     }
 }
 
@@ -805,6 +1301,7 @@ extension TableViewController: NSTableViewDelegate {
             textField.lineBreakMode = .byTruncatingTail
             textField.cell?.truncatesLastVisibleLine = true
             textField.font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+            textField.wantsLayer = true
             cellView = textField
         }
 
@@ -826,6 +1323,9 @@ extension TableViewController: NSTableViewDelegate {
             )
             requestPageFetch(forRow: row)
         }
+
+        // Show/hide the edited cell dot indicator
+        updateEditedDot(on: cell, row: row, columnName: columnName, session: session)
 
         return cell
     }
@@ -865,6 +1365,51 @@ extension TableViewController: NSMenuDelegate {
         filterItem.target = self
         filterItem.representedObject = columnName as NSString
         menu.addItem(filterItem)
+
+        // Rename Column option (hidden for _gridka_rowid)
+        if columnName != "_gridka_rowid" {
+            let renameItem = NSMenuItem(title: "Rename Column…", action: #selector(renameColumnClicked(_:)), keyEquivalent: "")
+            renameItem.target = self
+            renameItem.representedObject = columnName as NSString
+            menu.addItem(renameItem)
+        }
+
+        // Change Type submenu (hidden for _gridka_rowid)
+        if columnName != "_gridka_rowid",
+           let descriptor = session.columns.first(where: { $0.name == columnName }) {
+            let changeTypeItem = NSMenuItem(title: "Change Type", action: nil, keyEquivalent: "")
+            let typeSubmenu = NSMenu()
+
+            let typeOptions: [(String, String, DisplayType)] = [
+                ("Text", "VARCHAR", .text),
+                ("Integer", "BIGINT", .integer),
+                ("Float", "DOUBLE", .float),
+                ("Date", "DATE", .date),
+                ("Boolean", "BOOLEAN", .boolean),
+            ]
+
+            for (title, duckDBType, displayType) in typeOptions {
+                let item = NSMenuItem(title: title, action: #selector(changeColumnTypeClicked(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = [columnName, duckDBType] as [String]
+                // Show checkmark for the current type
+                if descriptor.displayType == displayType {
+                    item.state = .on
+                }
+                typeSubmenu.addItem(item)
+            }
+
+            changeTypeItem.submenu = typeSubmenu
+            menu.addItem(changeTypeItem)
+        }
+
+        // Delete Column option (hidden for _gridka_rowid)
+        if columnName != "_gridka_rowid" {
+            let deleteItem = NSMenuItem(title: "Delete Column", action: #selector(deleteColumnClicked(_:)), keyEquivalent: "")
+            deleteItem.target = self
+            deleteItem.representedObject = columnName as NSString
+            menu.addItem(deleteItem)
+        }
 
         menu.addItem(NSMenuItem.separator())
 
@@ -906,7 +1451,9 @@ extension TableViewController: NSMenuDelegate {
         selectedRow = clickedRow
         selectedColumnName = tableView.tableColumns[clickedCol].identifier.rawValue
         tableView.selectRowIndexes(IndexSet(integer: clickedRow), byExtendingSelection: false)
+        updateCellHighlight(row: clickedRow, column: clickedCol)
         updateDetailPane()
+        statusBar.updateCellLocation(row: clickedRow, columnName: selectedColumnName)
 
         let copyCell = NSMenuItem(title: "Copy Cell", action: #selector(copyCellValue(_:)), keyEquivalent: "")
         copyCell.target = self
@@ -949,6 +1496,74 @@ extension TableViewController: NSMenuDelegate {
 
         let headerRect = headerView.headerRect(ofColumn: columnIndex)
         showFilterPopover(for: descriptor, relativeTo: headerRect, of: headerView)
+    }
+
+    @objc private func renameColumnClicked(_ sender: NSMenuItem) {
+        guard let columnName = sender.representedObject as? String,
+              let session = fileSession else { return }
+
+        guard let headerView = tableView.headerView else { return }
+        let columnIndex = tableView.column(withIdentifier: NSUserInterfaceItemIdentifier(columnName))
+        guard columnIndex >= 0 else { return }
+
+        let existingNames = session.columns.map { $0.name }
+        let headerRect = headerView.headerRect(ofColumn: columnIndex)
+
+        let renameVC = RenameColumnPopoverController(
+            currentName: columnName,
+            existingNames: existingNames
+        )
+        renameVC.onRename = { [weak self] newName in
+            self?.onColumnRenamed?(columnName, newName)
+        }
+
+        let popover = NSPopover()
+        popover.contentViewController = renameVC
+        popover.behavior = .transient
+        renameVC.popover = popover
+        popover.show(relativeTo: headerRect, of: headerView, preferredEdge: .maxY)
+        activePopover = popover
+    }
+
+    @objc private func changeColumnTypeClicked(_ sender: NSMenuItem) {
+        guard let params = sender.representedObject as? [String],
+              params.count == 2 else { return }
+        let columnName = params[0]
+        let duckDBType = params[1]
+
+        // If the current type already matches, do nothing
+        guard let session = fileSession,
+              let descriptor = session.columns.first(where: { $0.name == columnName }) else { return }
+
+        let currentDuckDBType: String
+        switch descriptor.displayType {
+        case .text:     currentDuckDBType = "VARCHAR"
+        case .integer:  currentDuckDBType = "BIGINT"
+        case .float:    currentDuckDBType = "DOUBLE"
+        case .date:     currentDuckDBType = "DATE"
+        case .boolean:  currentDuckDBType = "BOOLEAN"
+        case .unknown:  currentDuckDBType = ""
+        }
+        guard duckDBType != currentDuckDBType else { return }
+
+        onColumnTypeChanged?(columnName, duckDBType)
+    }
+
+    @objc private func deleteColumnClicked(_ sender: NSMenuItem) {
+        guard let columnName = sender.representedObject as? String else { return }
+        guard let window = view.window else { return }
+
+        let alert = NSAlert()
+        alert.messageText = "Delete column \"\(columnName)\"?"
+        alert.informativeText = "This cannot be undone."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Cancel")
+
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            self?.onColumnDeleted?(columnName)
+        }
     }
 
     @objc private func hideColumnClicked(_ sender: NSMenuItem) {
@@ -1079,6 +1694,114 @@ private extension NSFont {
     }
 }
 
+// MARK: - NSImage Tinting Helper
+
+private extension NSImage {
+    /// Returns a copy of the image tinted with the specified color.
+    func tinted(with color: NSColor) -> NSImage {
+        let tinted = self.copy() as! NSImage
+        tinted.lockFocus()
+        color.set()
+        let imageRect = NSRect(origin: .zero, size: tinted.size)
+        imageRect.fill(using: .sourceAtop)
+        tinted.unlockFocus()
+        tinted.isTemplate = false
+        return tinted
+    }
+}
+
+
+// MARK: - RowNumberView
+
+/// Custom view that draws row numbers in the frozen left gutter.
+/// Added as a direct subview of NSScrollView, positioned over the left content inset.
+/// Uses coordinate conversion from the tableView to position row numbers correctly.
+final class RowNumberView: NSView {
+
+    weak var tableView: NSTableView?
+    var onRowClicked: ((Int) -> Void)?
+
+    private var visibleRowRange: Range<Int> = 0..<0
+    private let font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+    private let textColor = NSColor.secondaryLabelColor
+    private let bgColor = NSColor.windowBackgroundColor
+    private let borderColor = NSColor.separatorColor
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        wantsLayer = true
+    }
+
+    func updateVisibleRows() {
+        guard let tableView = tableView else { return }
+        let visibleRect = tableView.visibleRect
+        let range = tableView.rows(in: visibleRect)
+        guard range.length > 0 else { return }
+        let start = max(0, range.location)
+        let end = start + range.length
+        visibleRowRange = start..<end
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let tableView = tableView else { return }
+
+        // Background
+        bgColor.setFill()
+        bounds.fill()
+
+        // Right border
+        borderColor.setStroke()
+        let borderPath = NSBezierPath()
+        borderPath.move(to: NSPoint(x: bounds.maxX - 0.5, y: bounds.minY))
+        borderPath.line(to: NSPoint(x: bounds.maxX - 0.5, y: bounds.maxY))
+        borderPath.lineWidth = 1
+        borderPath.stroke()
+
+        // Draw row numbers using coordinate conversion
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.alignment = .right
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: textColor,
+            .paragraphStyle: paragraphStyle,
+        ]
+
+        for row in visibleRowRange {
+            let rowRect = tableView.rect(ofRow: row)
+            let convertedRect = convert(rowRect, from: tableView)
+            let drawRect = NSRect(
+                x: 4,
+                y: convertedRect.origin.y + 1,
+                width: bounds.width - 10,
+                height: convertedRect.height
+            )
+            guard drawRect.intersects(dirtyRect) else { continue }
+
+            let text = "\(row + 1)"
+            text.draw(in: drawRect, withAttributes: attrs)
+        }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let localPoint = convert(event.locationInWindow, from: nil)
+        guard let tableView = tableView else { return }
+
+        for row in visibleRowRange {
+            let rowRect = tableView.rect(ofRow: row)
+            let convertedRect = convert(rowRect, from: tableView)
+            if localPoint.y >= convertedRect.origin.y && localPoint.y < convertedRect.maxY {
+                onRowClicked?(row)
+                return
+            }
+        }
+    }
+}
 
 // MARK: - Previewer
 

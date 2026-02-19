@@ -16,13 +16,15 @@ targets:
     platform: macOS
     sources:
       - path: Sources
-    resources:
       - path: Resources
+        buildPhase: resources
+        excludes:
+          - Info.plist
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.gridka.app
-        INFOPLIST_GENERATION_MODE: GeneratedByXcode
-        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: org.ceesaxp.gridka.app
+        INFOPLIST_FILE: Resources/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         MARKETING_VERSION: "1.0.0"
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_OBJC_BRIDGING_HEADER: Sources/Bridging/Gridka-Bridging-Header.h
@@ -36,6 +38,9 @@ targets:
         LD_RUNPATH_SEARCH_PATHS:
           - "@executable_path/../Frameworks"
           - "$(PROJECT_DIR)/Libraries"
+    dependencies:
+      - target: GridkaQuickLook
+        embed: true
     postCompileScripts:
       - script: |
           mkdir -p "${BUILT_PRODUCTS_DIR}/Gridka.app/Contents/Frameworks"
@@ -45,6 +50,21 @@ targets:
           - "$(PROJECT_DIR)/Libraries/libduckdb.dylib"
         outputFiles:
           - "$(BUILT_PRODUCTS_DIR)/Gridka.app/Contents/Frameworks/libduckdb.dylib"
+  GridkaQuickLook:
+    type: app-extension
+    platform: macOS
+    sources:
+      - path: QuickLookExtension
+        excludes:
+          - Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.ceesaxp.gridka.app.quicklook
+        PRODUCT_NAME: GridkaQuickLook
+        INFOPLIST_FILE: QuickLookExtension/Info.plist
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SKIP_INSTALL: YES
   GridkaTests:
     type: bundle.unit-test
     platform: macOS

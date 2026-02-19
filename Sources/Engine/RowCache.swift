@@ -60,6 +60,11 @@ struct RowCache {
         pages.removeAll()
     }
 
+    /// Removes a single cached page so it will be re-fetched on next access.
+    mutating func invalidatePage(_ index: Int) {
+        pages.removeValue(forKey: index)
+    }
+
     // MARK: - Page Math
 
     func pageIndex(forRow row: Int) -> Int {
