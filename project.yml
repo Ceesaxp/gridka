@@ -11,6 +11,7 @@ settings:
     SWIFT_VERSION: "5.10"
     MACOSX_DEPLOYMENT_TARGET: "14.0"
     CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: Q34D9AYJ95
     ENABLE_HARDENED_RUNTIME: YES
 targets:
   Gridka:
@@ -48,9 +49,7 @@ targets:
       - script: |
           mkdir -p "${BUILT_PRODUCTS_DIR}/Gridka.app/Contents/Frameworks"
           cp -f "${PROJECT_DIR}/Libraries/libduckdb.dylib" "${BUILT_PRODUCTS_DIR}/Gridka.app/Contents/Frameworks/libduckdb.dylib"
-          if [ -n "${CODE_SIGN_IDENTITY:-}" ] && [ "${CODE_SIGN_IDENTITY}" != "-" ]; then
-            codesign --force --sign "${CODE_SIGN_IDENTITY}" --options runtime "${BUILT_PRODUCTS_DIR}/Gridka.app/Contents/Frameworks/libduckdb.dylib"
-          fi
+          codesign --force --sign "${CODE_SIGN_IDENTITY:--}" --options runtime "${BUILT_PRODUCTS_DIR}/Gridka.app/Contents/Frameworks/libduckdb.dylib"
         name: Copy and Sign DuckDB dylib
         inputFiles:
           - "$(PROJECT_DIR)/Libraries/libduckdb.dylib"
