@@ -94,9 +94,13 @@ final class SettingsWindowController: NSWindowController {
 
     @objc private func thousandsSeparatorChanged(_ sender: NSButton) {
         SettingsManager.shared.useThousandsSeparator = (sender.state == .on)
+        // Refresh the other checkbox (mutual exclusivity)
+        decimalCommaCheckbox.state = SettingsManager.shared.useDecimalComma ? .on : .off
     }
 
     @objc private func decimalCommaChanged(_ sender: NSButton) {
         SettingsManager.shared.useDecimalComma = (sender.state == .on)
+        // Refresh the other checkbox (mutual exclusivity)
+        thousandsSeparatorCheckbox.state = SettingsManager.shared.useThousandsSeparator ? .on : .off
     }
 }

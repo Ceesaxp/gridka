@@ -10,6 +10,8 @@ settings:
   base:
     SWIFT_VERSION: "5.10"
     MACOSX_DEPLOYMENT_TARGET: "14.0"
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_HARDENED_RUNTIME: YES
 targets:
   Gridka:
     type: application
@@ -25,6 +27,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: org.ceesaxp.gridka.app
         INFOPLIST_FILE: Resources/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGN_ENTITLEMENTS: Gridka.entitlements
         MARKETING_VERSION: "1.0.0"
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_OBJC_BRIDGING_HEADER: Sources/Bridging/Gridka-Bridging-Header.h
@@ -45,7 +48,10 @@ targets:
       - script: |
           mkdir -p "${BUILT_PRODUCTS_DIR}/Gridka.app/Contents/Frameworks"
           cp -f "${PROJECT_DIR}/Libraries/libduckdb.dylib" "${BUILT_PRODUCTS_DIR}/Gridka.app/Contents/Frameworks/libduckdb.dylib"
-        name: Copy DuckDB dylib
+          if [ -n "${CODE_SIGN_IDENTITY:-}" ] && [ "${CODE_SIGN_IDENTITY}" != "-" ]; then
+            codesign --force --sign "${CODE_SIGN_IDENTITY}" --options runtime "${BUILT_PRODUCTS_DIR}/Gridka.app/Contents/Frameworks/libduckdb.dylib"
+          fi
+        name: Copy and Sign DuckDB dylib
         inputFiles:
           - "$(PROJECT_DIR)/Libraries/libduckdb.dylib"
         outputFiles:
@@ -61,6 +67,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: org.ceesaxp.gridka.app.quicklook
         PRODUCT_NAME: GridkaQuickLook
+        CODE_SIGN_ENTITLEMENTS: GridkaQuickLook.entitlements
         INFOPLIST_FILE: QuickLookExtension/Info.plist
         MARKETING_VERSION: "1.0.0"
         CURRENT_PROJECT_VERSION: "1"

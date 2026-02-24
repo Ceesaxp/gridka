@@ -450,7 +450,7 @@ final class FileSession {
         let delimiterEscaped = effectiveDelimiter.replacingOccurrences(of: "'", with: "''")
         let headerParam = hasHeaders ? "true" : "false"
 
-        let sql = "COPY (SELECT \(exportColumns) FROM data) TO '\(path)' (FORMAT CSV, HEADER \(headerParam), DELIMITER '\(delimiterEscaped)')"
+        let sql = "COPY (SELECT \(exportColumns) FROM data) TO '\(path)' (FORMAT CSV, HEADER \(headerParam), DELIMITER '\(delimiterEscaped)', FORCE_QUOTE *)"
 
         queryQueue.async { [weak self] in
             do {
@@ -483,7 +483,7 @@ final class FileSession {
         if encoding == .utf8 {
             // DuckDB COPY TO natively supports UTF-8
             let path = url.path.replacingOccurrences(of: "'", with: "''")
-            let sql = "COPY (SELECT \(exportColumns) FROM data) TO '\(path)' (FORMAT CSV, HEADER \(headerParam), DELIMITER '\(delimiterEscaped)')"
+            let sql = "COPY (SELECT \(exportColumns) FROM data) TO '\(path)' (FORMAT CSV, HEADER \(headerParam), DELIMITER '\(delimiterEscaped)', FORCE_QUOTE *)"
 
             queryQueue.async { [weak self] in
                 do {
@@ -549,12 +549,8 @@ final class FileSession {
                             case .date(let d):
                                 text = d
                             }
-                            // CSV escape: quote fields containing delimiter, quotes, or newlines
-                            if text.contains(delimiter) || text.contains("\"") || text.contains("\n") || text.contains("\r") {
-                                fields.append("\"" + text.replacingOccurrences(of: "\"", with: "\"\"") + "\"")
-                            } else {
-                                fields.append(text)
-                            }
+                            // Force-quote all fields to preserve type info (matches FORCE_QUOTE * in UTF-8 path)
+                            fields.append("\"" + text.replacingOccurrences(of: "\"", with: "\"\"") + "\"")
                         }
                         lines.append(fields.joined(separator: delimiter))
                     }
