@@ -1,0 +1,97 @@
+name: Bug Report
+description: Report a reproducible problem in Gridka
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug.
+        Please provide enough detail for us to reproduce and fix the issue quickly.
+
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      description: A short, clear description of the bug.
+      placeholder: "Example: App crashes when opening a malformed CSV file"
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Tell us exactly how to reproduce the issue.
+      placeholder: |
+        1. Open Gridka
+        2. Click File > Open...
+        3. Select ...
+        4. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What should have happened?
+      placeholder: "The file should open without errors."
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What happened instead?
+      placeholder: "The app crashed with an uncaught exception."
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Gridka Version
+      description: What version are you running?
+      placeholder: "Example: v1.0.0"
+    validations:
+      required: true
+
+  - type: input
+    id: macos
+    attributes:
+      label: macOS Version
+      description: Your operating system version.
+      placeholder: "Example: macOS 15.3"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install_method
+    attributes:
+      label: Installation Method
+      options:
+        - Downloaded release binary
+        - Built from source
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / Screenshots
+      description: Paste relevant logs, stack traces, or screenshots.
+      placeholder: "Attach logs or screenshots here."
+      render: shell
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and did not find a duplicate.
+          required: true
+        - label: I can reproduce this issue consistently.
+          required: false

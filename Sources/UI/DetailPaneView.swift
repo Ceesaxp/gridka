@@ -32,29 +32,27 @@ final class DetailPaneView: NSView {
         return label
     }()
 
-    private let valueTextView: NSTextView = {
-        let textView = NSTextView()
-        textView.isEditable = false
-        textView.isSelectable = true
-        textView.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
-        textView.textColor = .labelColor
-        textView.backgroundColor = .clear
-        textView.isVerticallyResizable = true
-        textView.isHorizontallyResizable = false
-        textView.textContainer?.widthTracksTextView = true
-        textView.textContainer?.lineFragmentPadding = 0
-        return textView
-    }()
-
     private let scrollView: NSScrollView = {
-        let sv = NSScrollView()
+        let sv = NSTextView.scrollableTextView()
+        sv.translatesAutoresizingMaskIntoConstraints = false
+        sv.drawsBackground = false
         sv.hasVerticalScroller = true
         sv.hasHorizontalScroller = false
         sv.autohidesScrollers = true
-        sv.translatesAutoresizingMaskIntoConstraints = false
-        sv.drawsBackground = false
+        let tv = sv.documentView as! NSTextView
+        tv.isEditable = false
+        tv.isSelectable = true
+        tv.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        tv.textColor = .labelColor
+        tv.drawsBackground = false
+        tv.textContainerInset = .zero
+        tv.textContainer?.lineFragmentPadding = 0
         return sv
     }()
+
+    private var valueTextView: NSTextView {
+        scrollView.documentView as! NSTextView
+    }
 
     private let separator: NSBox = {
         let box = NSBox()
@@ -85,9 +83,6 @@ final class DetailPaneView: NSView {
     }
 
     private func setup() {
-        // Frame is managed by NSSplitView.
-        scrollView.documentView = valueTextView
-
         addSubview(separator)
         addSubview(columnNameLabel)
         addSubview(dataTypeLabel)
@@ -162,6 +157,7 @@ final class DetailPaneView: NSView {
 
         valueTextView.string = valueString
         valueTextView.scrollToBeginningOfDocument(nil)
+        needsLayout = true
     }
 
     func showEmpty() {
