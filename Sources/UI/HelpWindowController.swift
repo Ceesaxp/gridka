@@ -50,31 +50,17 @@ final class HelpWindowController: NSWindowController {
         let item = NSTabViewItem()
         item.label = label
 
-        let container = NSView()
-
-        let scrollView = NSScrollView()
-        scrollView.autoresizingMask = [.width, .height]
-        scrollView.hasVerticalScroller = true
+        let scrollView = NSTextView.scrollableTextView()
         scrollView.drawsBackground = false
 
-        let textView = NSTextView()
+        let textView = scrollView.documentView as! NSTextView
         textView.isEditable = false
         textView.isSelectable = true
         textView.drawsBackground = false
         textView.textContainerInset = NSSize(width: 12, height: 12)
-        textView.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
-        textView.textContainer?.widthTracksTextView = true
-        textView.isVerticallyResizable = true
-        textView.isHorizontallyResizable = false
-        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-
-        scrollView.documentView = textView
-        container.addSubview(scrollView)
-
-        scrollView.frame = container.bounds
         textView.textStorage?.setAttributedString(content)
 
-        item.view = container
+        item.view = scrollView
         return item
     }
 
