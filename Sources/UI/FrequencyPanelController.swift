@@ -28,6 +28,7 @@ final class FrequencyPanelController: NSWindowController, NSWindowDelegate {
         if let existing = shared {
             if existing.columnName == column {
                 existing.window?.makeKeyAndOrderFront(nil)
+                existing.loadFrequencyData()
                 return
             }
             // Different column — close old panel and open new one
