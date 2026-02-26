@@ -734,21 +734,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
         tvc.onColumnRenamed = { [weak self, weak tvc] oldName, newName in
             guard let self = self, let tvc = tvc, let tab = self.tab(for: tvc) else { return }
+            guard tab.fileSession?.isSummarySession != true else { return }
             self.handleColumnRenamed(tab: tab, oldName: oldName, newName: newName)
         }
 
         tvc.onColumnTypeChanged = { [weak self, weak tvc] columnName, duckDBType in
             guard let self = self, let tvc = tvc, let tab = self.tab(for: tvc) else { return }
+            guard tab.fileSession?.isSummarySession != true else { return }
             self.handleColumnTypeChanged(tab: tab, columnName: columnName, duckDBType: duckDBType)
         }
 
         tvc.onColumnDeleted = { [weak self, weak tvc] columnName in
             guard let self = self, let tvc = tvc, let tab = self.tab(for: tvc) else { return }
+            guard tab.fileSession?.isSummarySession != true else { return }
             self.handleColumnDeleted(tab: tab, columnName: columnName)
         }
 
         tvc.onComputedColumnRemoved = { [weak self, weak tvc] columnName in
             guard let self = self, let tvc = tvc, let tab = self.tab(for: tvc) else { return }
+            guard tab.fileSession?.isSummarySession != true else { return }
             self.handleComputedColumnRemoved(tab: tab, columnName: columnName)
         }
 
