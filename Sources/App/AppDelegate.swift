@@ -1546,7 +1546,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             tvc.analysisBar.setFeatureActive(.frequency, active: FrequencyPanelController.isVisible)
         case .groupBy:
             if isActive {
-                guard let session = tab.fileSession, session.isFullyLoaded else {
+                guard let session = tab.fileSession, session.isFullyLoaded,
+                      !session.isSummarySession else {
                     tvc.analysisBar.setFeatureActive(.groupBy, active: false)
                     return
                 }
@@ -1557,7 +1558,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             tvc.analysisBar.setFeatureActive(.groupBy, active: GroupByPanelController.isVisible)
         case .computedColumn:
             if isActive {
-                guard let session = tab.fileSession else { return }
+                guard let session = tab.fileSession, !session.isSummarySession else {
+                    tvc.analysisBar.setFeatureActive(.computedColumn, active: false)
+                    return
+                }
                 ComputedColumnPanelController.show(fileSession: session)
             } else {
                 ComputedColumnPanelController.closeIfOpen()
