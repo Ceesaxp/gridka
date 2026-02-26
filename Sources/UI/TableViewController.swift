@@ -11,7 +11,10 @@ final class TableViewController: NSViewController {
     private(set) var searchBar: SearchBarView!
     private(set) var analysisBar: AnalysisToolbarView!
     private(set) var detailPane: DetailPaneView!
+    private(set) var profilerSidebar: ProfilerSidebarView!
     private var splitView: NSSplitView!
+    /// Outer horizontal split view: left = main content (splitView), right = profiler sidebar.
+    private var outerSplitView: NSSplitView!
 
     /// Called when the user changes sort via column header clicks.
     var onSortChanged: (([SortColumn]) -> Void)?
@@ -55,6 +58,9 @@ final class TableViewController: NSViewController {
 
     /// Whether the detail pane is visible.
     private var isDetailPaneVisible = true
+
+    /// Whether the profiler sidebar is visible.
+    private(set) var isProfilerVisible = false
 
     /// Currently highlighted cell view for visual feedback.
     private weak var highlightedCellView: NSView?
@@ -192,8 +198,9 @@ final class TableViewController: NSViewController {
 
         statusBar = StatusBarView()
         detailPane = DetailPaneView()
+        profilerSidebar = ProfilerSidebarView()
 
-        // Split view: top = scroll view with table, bottom = detail pane
+        // Inner split view: top = scroll view with table, bottom = detail pane
         splitView = NSSplitView()
         splitView.isVertical = false
         splitView.dividerStyle = .thin
@@ -205,15 +212,30 @@ final class TableViewController: NSViewController {
         splitView.setHoldingPriority(.defaultHigh, forSubviewAt: 1)
         splitView.delegate = self
 
+        // Outer split view: left = main content (splitView), right = profiler sidebar
+        outerSplitView = NSSplitView()
+        outerSplitView.isVertical = true
+        outerSplitView.dividerStyle = .thin
+        outerSplitView.identifier = NSUserInterfaceItemIdentifier("outerSplitView")
+        outerSplitView.addSubview(splitView)
+        outerSplitView.addSubview(profilerSidebar)
+        outerSplitView.adjustSubviews()
+        outerSplitView.setHoldingPriority(.defaultLow, forSubviewAt: 0)
+        outerSplitView.setHoldingPriority(.defaultHigh, forSubviewAt: 1)
+        outerSplitView.delegate = self
+
+        // Profiler sidebar starts hidden
+        profilerSidebar.isHidden = true
+
         // Add children to container — GridkaContainerView handles layout.
         // Order matters for z-ordering: bars are added last so they draw
         // on top of the split view when they become visible.
         container.filterBar = filterBar
         container.searchBar = searchBar
         container.analysisBar = analysisBar
-        container.splitView = splitView
+        container.splitView = outerSplitView
         container.statusBar = statusBar
-        container.addSubview(splitView)
+        container.addSubview(outerSplitView)
         container.addSubview(statusBar)
         container.addSubview(filterBar)
         container.addSubview(searchBar)
@@ -242,6 +264,11 @@ final class TableViewController: NSViewController {
         // Restore analysis toolbar visibility from persisted settings
         if SettingsManager.shared.analysisToolbarVisible {
             analysisBar.setVisible(true)
+        }
+
+        // Restore profiler sidebar visibility from persisted settings
+        if SettingsManager.shared.profilerSidebarVisible {
+            showProfilerSidebar(animated: false)
         }
     }
 
@@ -299,6 +326,7 @@ final class TableViewController: NSViewController {
         tableView.menu?.delegate = nil
         tableView.headerView?.menu?.delegate = nil
         splitView.delegate = nil
+        outerSplitView.delegate = nil
         fileSession = nil
         view.removeFromSuperview()
     }
@@ -573,6 +601,73 @@ final class TableViewController: NSViewController {
         let newVisible = !analysisBar.isToolbarVisible
         analysisBar.setVisible(newVisible)
         SettingsManager.shared.analysisToolbarVisible = newVisible
+    }
+
+    // MARK: - Profiler Sidebar
+
+    /// Toggles the profiler sidebar visibility.
+    func toggleProfilerSidebar() {
+        if isProfilerVisible {
+            hideProfilerSidebar(animated: true)
+        } else {
+            showProfilerSidebar(animated: true)
+        }
+        SettingsManager.shared.profilerSidebarVisible = isProfilerVisible
+        // Sync the analysis toolbar Profiler button state
+        analysisBar.setFeatureActive(.profiler, active: isProfilerVisible)
+    }
+
+    /// Shows the profiler sidebar with optional animation.
+    private func showProfilerSidebar(animated: Bool) {
+        guard !isProfilerVisible else { return }
+        isProfilerVisible = true
+        profilerSidebar.isHidden = false
+        outerSplitView.adjustSubviews()
+
+        let targetPosition = max(outerSplitView.bounds.width - 300, 240)
+        if animated {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.2
+                context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                outerSplitView.animator().setPosition(targetPosition, ofDividerAt: 0)
+            }
+        } else {
+            outerSplitView.setPosition(targetPosition, ofDividerAt: 0)
+        }
+
+        // Update the profiler content for current selection
+        updateProfilerSidebar()
+    }
+
+    /// Hides the profiler sidebar with optional animation.
+    private func hideProfilerSidebar(animated: Bool) {
+        guard isProfilerVisible else { return }
+        isProfilerVisible = false
+
+        if animated {
+            NSAnimationContext.runAnimationGroup({ context in
+                context.duration = 0.2
+                context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                outerSplitView.animator().setPosition(outerSplitView.bounds.width, ofDividerAt: 0)
+            }, completionHandler: { [weak self] in
+                self?.profilerSidebar.isHidden = true
+            })
+        } else {
+            profilerSidebar.isHidden = true
+            outerSplitView.adjustSubviews()
+        }
+    }
+
+    /// Updates profiler sidebar to reflect the currently selected column.
+    func updateProfilerSidebar() {
+        guard isProfilerVisible else { return }
+        guard let session = fileSession,
+              let selectedCol = session.viewState.selectedColumn,
+              let descriptor = session.columns.first(where: { $0.name == selectedCol }) else {
+            profilerSidebar.showPlaceholder()
+            return
+        }
+        profilerSidebar.showColumn(name: descriptor.name, typeName: duckDBTypeName(for: descriptor))
     }
 
     func updateDetailPane() {
@@ -1654,18 +1749,29 @@ extension TableViewController: NSMenuDelegate {
 extension TableViewController: NSSplitViewDelegate {
 
     func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimumPosition: CGFloat, ofDividerAt dividerIndex: Int) -> CGFloat {
-        // Table (first pane) needs at least 100pt
+        if splitView === outerSplitView {
+            // Main content area needs at least 300pt
+            return 300
+        }
+        // Inner split: table needs at least 100pt
         return 100
     }
 
     func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposedMaximumPosition: CGFloat, ofDividerAt dividerIndex: Int) -> CGFloat {
-        // Detail pane (second pane) needs at least 60pt
+        if splitView === outerSplitView {
+            // Profiler sidebar needs at least 240pt
+            return splitView.bounds.width - 240
+        }
+        // Inner split: detail pane needs at least 60pt
         return splitView.bounds.height - 60
     }
 
     func splitView(_ splitView: NSSplitView, shouldAdjustSizeOfSubview view: NSView) -> Bool {
-        // Only the table (scrollView) should absorb size changes.
-        // The detail pane keeps its current height when the split view resizes.
+        if splitView === outerSplitView {
+            // Main content absorbs size changes; profiler sidebar keeps its width.
+            return view !== profilerSidebar
+        }
+        // Inner split: table absorbs size changes; detail pane keeps its height.
         return view !== detailPane
     }
 }

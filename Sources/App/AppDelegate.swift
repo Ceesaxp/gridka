@@ -240,6 +240,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         toggleAnalysisItem.target = self
         viewMenu.addItem(toggleAnalysisItem)
 
+        let toggleProfilerItem = NSMenuItem(title: "Toggle Column Profiler", action: #selector(toggleProfilerAction(_:)), keyEquivalent: "p")
+        toggleProfilerItem.keyEquivalentModifierMask = [.command, .shift]
+        toggleProfilerItem.target = self
+        viewMenu.addItem(toggleProfilerItem)
+
         viewMenu.addItem(NSMenuItem.separator())
 
         let headerToggleItem = NSMenuItem(title: "First Row as Header", action: #selector(toggleHeaderAction(_:)), keyEquivalent: "")
@@ -747,6 +752,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         activeTab?.tableViewController?.toggleAnalysisToolbar()
     }
 
+    @objc private func toggleProfilerAction(_ sender: Any?) {
+        activeTab?.tableViewController?.toggleProfilerSidebar()
+    }
+
     // MARK: - Header Toggle
 
     @objc private func toggleHeaderAction(_ sender: Any?) {
@@ -1233,14 +1242,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         session.updateViewState(newState)
 
         tvc.updateSortIndicators()
+        tvc.updateProfilerSidebar()
     }
 
     // MARK: - Analysis Feature Handling
 
     private func handleAnalysisFeatureToggled(tab: TabContext, feature: AnalysisFeature, isActive: Bool) {
-        // Placeholder: individual analysis features (Profiler, Frequency, Group By,
-        // Computed Column) are implemented in later stories (US-003+).
-        // The toolbar button toggle state is already tracked by AnalysisToolbarView.
+        guard let tvc = tab.tableViewController else { return }
+        switch feature {
+        case .profiler:
+            // Sync profiler sidebar visibility with toolbar button state
+            if isActive != tvc.isProfilerVisible {
+                tvc.toggleProfilerSidebar()
+            }
+        case .frequency, .groupBy, .computedColumn:
+            // Placeholder: these features are implemented in later stories.
+            break
+        }
     }
 
     // MARK: - Search Handling
@@ -1387,6 +1405,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         if menuItem.action == #selector(toggleAnalysisToolbarAction(_:)) {
             let visible = tvc?.analysisBar?.isToolbarVisible ?? false
             menuItem.title = visible ? "Hide Analysis Toolbar" : "Show Analysis Toolbar"
+            return tvc != nil
+        }
+        if menuItem.action == #selector(toggleProfilerAction(_:)) {
+            let visible = tvc?.isProfilerVisible ?? false
+            menuItem.title = visible ? "Hide Column Profiler" : "Toggle Column Profiler"
             return tvc != nil
         }
         return true

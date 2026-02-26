@@ -811,3 +811,46 @@
   - The sort indicator click width of 24pt provides enough target area for the arrow glyphs without making it too easy to accidentally click
   - `selectedColumn` changes in ViewState don't affect data queries — `updateViewState` correctly only invalidates cache on sort/filter/search changes, not on selection changes
 ----
+
+## 2026-02-26 - US-002 - Add analysis toolbar below tab bar
+- US-002 was already fully implemented in a prior session: AnalysisToolbarView.swift, SettingsManager.analysisToolbarVisible, View menu item (Opt+Cmd+T), GridkaContainerView layout integration
+- The Xcode project needed regeneration with xcodegen to include the new files (AnalysisToolbarView.swift, SettingsManager.swift)
+- Created Makefile with `generate`, `build`, `test`, `clean` targets wrapping xcodegen and xcodebuild
+- Verified all 64 tests pass, marked US-002 as passing in PRD
+- **Learnings for future iterations:**
+  - When new .swift files are added to Sources/ but not yet in the Xcode project, `make generate` (xcodegen) must be run before building
+  - The Makefile provides a way to run xcodegen under `make` permissions when direct xcodegen execution is restricted
+----
+
+## 2026-02-26 - US-003 - Create profiler sidebar container with NSSplitView
+- Created Sources/UI/ProfilerSidebarView.swift: scrollable right sidebar with NSScrollView wrapping an NSStackView
+  - Shows column name (bold, 16pt) and color-coded type badge (green=INT, blue=VARCHAR, orange=FLOAT, purple=BOOLEAN, red=DATE)
+  - Placeholder text "Click a column header to inspect" when no column is selected
+  - FlippedClipView subclass ensures content starts at the top
+  - Left-edge separator for visual divider from main content
+- Added outer NSSplitView (`outerSplitView`) wrapping the existing inner splitView (table+detail) and profiler sidebar
+  - `outerSplitView.isVertical = true` for left/right layout
+  - Inner splitView handles table/detail pane split (top/bottom)
+  - NSSplitViewDelegate updated to differentiate outer vs inner split view constraints
+  - Profiler sidebar minimum width: 240pt; main content minimum: 300pt
+- Added `toggleProfilerSidebar()`, `showProfilerSidebar(animated:)`, `hideProfilerSidebar(animated:)` methods on TableViewController
+  - Animated collapse/expand using NSAnimationContext with 0.2s easeInEaseOut
+  - Default sidebar width: 300pt
+  - Syncs toolbar Profiler button state via `analysisBar.setFeatureActive(.profiler, active:)`
+- Added `profilerSidebarVisible: Bool` to SettingsManager for persistence across sessions
+- Added View menu → "Toggle Column Profiler" with Shift+Cmd+P shortcut
+- Menu validation dynamically updates title to "Hide Column Profiler" when visible
+- Toolbar Profiler button toggles sidebar via `handleAnalysisFeatureToggled` in AppDelegate
+- Column selection (`handleColumnSelected`) now updates profiler sidebar content via `updateProfilerSidebar()`
+- `updateProfilerSidebar()` shows column name + type when a column is selected, placeholder when none
+- `tearDown()` updated to nil out `outerSplitView.delegate`
+- Files changed: Sources/UI/ProfilerSidebarView.swift (new), Sources/UI/TableViewController.swift, Sources/Model/SettingsManager.swift, Sources/App/AppDelegate.swift, Makefile (new), plans/prd.json
+- Build succeeds, all 64 tests pass
+- **Learnings for future iterations:**
+  - `NSSplitView.isVertical = true` creates a left/right split (vertical divider), `false` creates top/bottom (horizontal divider) — naming is confusing
+  - Wrapping an existing NSSplitView inside another NSSplitView works cleanly — the inner split view delegate methods differentiate via `splitView === outerSplitView` identity checks
+  - `NSAnimationContext.runAnimationGroup` with `outerSplitView.animator().setPosition()` provides smooth animated sidebar collapse/expand
+  - The profiler sidebar starts with `isHidden = true` — NSSplitView treats hidden subviews as collapsed, so `adjustSubviews()` works correctly on initial layout
+  - `analysisBar.setFeatureActive(.profiler, active:)` syncs the toolbar button state without triggering the callback — prevents infinite toggle loops
+  - ProfilerSidebarView uses frame-based layout in `layout()` override for the separator and scroll view positioning, matching the project's pattern of frame-based parent layout with Auto Layout internals
+----

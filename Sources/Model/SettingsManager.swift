@@ -29,6 +29,7 @@ final class SettingsManager {
         static let thousandsSeparator = "GridkaThousandsSeparator"
         static let decimalComma = "GridkaDecimalComma"
         static let analysisToolbarVisible = "GridkaAnalysisToolbarVisible"
+        static let profilerSidebarVisible = "GridkaProfilerSidebarVisible"
     }
 
     private init() {}
@@ -84,6 +85,16 @@ final class SettingsManager {
         }
         set {
             UserDefaults.standard.set(newValue, forKey: Keys.analysisToolbarVisible)
+            notifyChange()
+        }
+    }
+
+    var profilerSidebarVisible: Bool {
+        get {
+            return UserDefaults.standard.bool(forKey: Keys.profilerSidebarVisible)
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: Keys.profilerSidebarVisible)
             notifyChange()
         }
     }

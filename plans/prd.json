@@ -35,7 +35,7 @@
         "Compiles and passes existing tests"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "Use NSView or NSStackView for the toolbar row. Buttons should use SF Symbols for icons (chart.bar, list.number, function, rectangle.3.group). The toolbar state (visible/hidden) is stored in SettingsManager for persistence."
     },
     {
@@ -53,7 +53,7 @@
         "Compiles and runs without crashes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "Follow the pattern of DetailPaneView (existing right sidebar). Use NSSplitView with the table on the left and profiler on the right. The profiler sidebar is a new ProfilerSidebarViewController. Add profilerVisible: Bool to ViewState."
     },
     {
