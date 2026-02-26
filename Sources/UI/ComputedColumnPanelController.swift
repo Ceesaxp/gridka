@@ -19,11 +19,17 @@ final class ComputedColumnPanelController: NSWindowController, NSWindowDelegate 
     private weak var fileSession: FileSession?
     private let existingColumnNames: Set<String>
 
-    /// Shows the computed column panel. If already open, brings it to front.
+    /// Shows the computed column panel. If already open for the same session, brings it
+    /// to front. If open for a different session, closes and recreates for the new session.
     static func show(fileSession: FileSession) {
         if let existing = shared {
-            existing.window?.makeKeyAndOrderFront(nil)
-            return
+            if existing.fileSession === fileSession {
+                existing.window?.makeKeyAndOrderFront(nil)
+                return
+            }
+            // Different session — close old panel and open new one
+            existing.window?.close()
+            shared = nil
         }
         let controller = ComputedColumnPanelController(fileSession: fileSession)
         shared = controller
