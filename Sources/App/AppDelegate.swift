@@ -839,7 +839,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
         var newState = session.viewState
         newState.filters = filters
-        session.updateViewState(newState)
+        session.updateViewState(newState) {
+            tvc.statusBar.updateRowCount(
+                showing: session.viewState.totalFilteredRows,
+                total: session.totalRows
+            )
+        }
 
         tvc.updateFilterBar()
         tvc.updateProfilerSidebar()
@@ -856,12 +861,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             case .failure:
                 break
             }
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                let filtered = session.viewState.totalFilteredRows
-                let total = session.totalRows
-                tvc.statusBar.updateRowCount(showing: filtered, total: total)
-            }
         }
 
         tvc.reloadVisibleRows()
@@ -872,7 +871,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
         var newState = session.viewState
         newState.filters = filters
-        session.updateViewState(newState)
+        session.updateViewState(newState) {
+            tvc.statusBar.updateRowCount(
+                showing: session.viewState.totalFilteredRows,
+                total: session.totalRows
+            )
+        }
 
         tvc.updateFilterBar()
         tvc.updateProfilerSidebar()
@@ -889,13 +893,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 tvc.statusBar.showQueryTime(filterTime)
             case .failure:
                 break
-            }
-
-            // Update row counts — requeryCount runs async, use small delay to let it complete
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                let filtered = session.viewState.totalFilteredRows
-                let total = session.totalRows
-                tvc.statusBar.updateRowCount(showing: filtered, total: total)
             }
         }
 
@@ -1225,7 +1222,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         if newState.selectedColumn == columnName {
             newState.selectedColumn = nil
         }
-        session.updateViewState(newState)
+        session.updateViewState(newState) {
+            tvc.statusBar.updateRowCount(
+                showing: session.viewState.totalFilteredRows,
+                total: session.totalRows
+            )
+        }
 
         // Remove the column from the table display
         tvc.removeComputedColumn(name: columnName)
@@ -1235,13 +1237,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         // Re-fetch page 0 without the removed computed column
         session.fetchPage(index: 0) { _ in
             tvc.reloadVisibleRows()
-
-            // Update row counts — requeryCount runs async, use small delay to let it complete
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                let filtered = session.viewState.totalFilteredRows
-                let total = session.totalRows
-                tvc.statusBar.updateRowCount(showing: filtered, total: total)
-            }
         }
     }
 
@@ -1388,18 +1383,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 switch result {
                 case .success:
                     // Requery the filtered count to update totalFilteredRows
-                    session.requeryFilteredCount()
-
-                    tvc.tableView.deselectAll(nil)
-                    tvc.reloadVisibleRows()
-
-                    // Update status bar row counts after requeryCount completes
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    session.requeryFilteredCount {
                         tvc.statusBar.updateRowCount(
                             showing: session.viewState.totalFilteredRows,
                             total: session.totalRows
                         )
                     }
+
+                    tvc.tableView.deselectAll(nil)
+                    tvc.reloadVisibleRows()
                 case .failure(let error):
                     self.showError(error, context: "deleting rows")
                 }
@@ -1594,7 +1586,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
         var newState = session.viewState
         newState.searchTerm = term.isEmpty ? nil : term
-        session.updateViewState(newState)
+        session.updateViewState(newState) {
+            tvc.statusBar.updateRowCount(
+                showing: session.viewState.totalFilteredRows,
+                total: session.totalRows
+            )
+            tvc.searchBar.updateMatchCount(session.viewState.totalFilteredRows)
+        }
 
         tvc.updateProfilerSidebar()
 
@@ -1610,14 +1608,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 tvc.statusBar.showQueryTime(searchTime)
             case .failure:
                 break
-            }
-
-            // Update row counts after requeryCount completes
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                let filtered = session.viewState.totalFilteredRows
-                let total = session.totalRows
-                tvc.statusBar.updateRowCount(showing: filtered, total: total)
-                tvc.searchBar.updateMatchCount(filtered)
             }
         }
 

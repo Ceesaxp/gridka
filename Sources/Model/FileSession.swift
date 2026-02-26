@@ -2182,7 +2182,12 @@ final class FileSession {
 
     // MARK: - View State Updates
 
-    func updateViewState(_ newState: ViewState) {
+    /// Updates the view state and optionally re-queries the filtered row count.
+    /// - Parameters:
+    ///   - newState: The new view state to apply.
+    ///   - completion: Called on the main thread after the filtered count is updated
+    ///     (if a requery was needed), or immediately if no count requery is required.
+    func updateViewState(_ newState: ViewState, completion: (() -> Void)? = nil) {
         dispatchPrecondition(condition: .onQueue(.main))
         let countChanged = newState.filters != viewState.filters
             || newState.searchTerm != viewState.searchTerm
@@ -2203,15 +2208,18 @@ final class FileSession {
         // Re-query count when filters/search change, or when computed columns
         // change while a search term is active (search includes computed aliases)
         if countChanged || computedAffectsCount {
-            requeryCount()
+            requeryCount(completion: completion)
+        } else {
+            completion?()
         }
     }
 
     /// Re-queries the filtered row count. Used after row deletion to update totalFilteredRows.
     /// Must be called on the main thread.
-    func requeryFilteredCount() {
+    /// - Parameter completion: Called on the main thread after totalFilteredRows is updated.
+    func requeryFilteredCount(completion: (() -> Void)? = nil) {
         dispatchPrecondition(condition: .onQueue(.main))
-        requeryCount()
+        requeryCount(completion: completion)
     }
 
     // MARK: - Private Helpers
@@ -2225,7 +2233,7 @@ final class FileSession {
         rowCache.invalidateAll()
     }
 
-    private func requeryCount() {
+    private func requeryCount(completion: (() -> Void)? = nil) {
         dispatchPrecondition(condition: .onQueue(.main))
         let sql = queryCoordinator.buildCountQuery(for: viewState, columns: columns)
 
@@ -2242,9 +2250,12 @@ final class FileSession {
 
                 DispatchQueue.main.async {
                     self.viewState.totalFilteredRows = count
+                    completion?()
                 }
             } catch {
-                // Count query failed — leave totalFilteredRows unchanged
+                DispatchQueue.main.async {
+                    completion?()
+                }
             }
         }
     }

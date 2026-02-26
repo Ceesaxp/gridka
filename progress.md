@@ -1523,3 +1523,23 @@
   - When changing a stored/computed property from non-optional to optional (e.g., `NSTextView` → `NSTextView?`), grep all usages and add `?.` optional chaining — the compiler will flag these as errors but it's easy to miss in large files
   - The FileSession encoding path had a subtle redundancy: the nil case for `swiftEncoding` was handled by early return on line 476, so the force unwrap on line 493 could never actually crash at runtime — but replacing it with `guard let` makes the intent explicit and future-proof
 ----
+
+## 2026-02-26, 21:01 - US-105 - Replace timing-based row-count sync with completion/versioned updates
+- Added `completion: (() -> Void)? = nil` parameter to `requeryCount()` (private), `requeryFilteredCount()` (public), and `updateViewState()` in FileSession
+- `requeryCount` now calls completion on main thread after `totalFilteredRows` is updated (or on error)
+- `updateViewState` forwards completion to `requeryCount` when a count requery is needed; calls completion immediately when no requery is required
+- Replaced all 5 `DispatchQueue.main.asyncAfter(deadline: .now() + 0.1)` calls in AppDelegate.swift:
+  1. `applyFrequencyFilter` — uses `updateViewState(completion:)` to update status bar row counts
+  2. `handleFiltersChanged` — uses `updateViewState(completion:)` to update status bar row counts
+  3. `handleComputedColumnRemoved` — uses `updateViewState(completion:)` to update status bar row counts
+  4. `deleteRows` handler — uses `requeryFilteredCount(completion:)` to update status bar row counts
+  5. `handleSearchChanged` — uses `updateViewState(completion:)` to update status bar and search match count
+- Status bar row counts now update deterministically from confirmed query results, not arbitrary delays
+- Files changed: Sources/Model/FileSession.swift, Sources/App/AppDelegate.swift, plans/prd.json
+- Build succeeds, all 71 tests pass
+- **Learnings for future iterations:**
+  - The `asyncAfter(0.1)` pattern was used because `requeryCount` had no completion handler — callers guessed the 100ms delay would be enough. Completion handlers make this deterministic regardless of query duration
+  - `updateViewState` doesn't always trigger `requeryCount` (only when filters/search change, or computed columns change with active search) — the completion fires immediately in the no-requery case, preserving responsiveness
+  - On the serial `queryQueue`, `requeryCount`'s query runs before `fetchPage`'s query (both enqueued in sequence). Their main-thread dispatches also arrive in order. So technically the asyncAfter was likely unnecessary even with 0ms delay — but the completion pattern is explicit and future-proof
+  - Other `asyncAfter` uses in the codebase (debouncing in SearchBarView, ComputedColumnPanelController, GroupByPanelController, FrequencyPanelController, StatusBarView) are intentional UX patterns, not timing hacks
+----
