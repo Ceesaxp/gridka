@@ -1494,7 +1494,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             tvc.analysisBar.setFeatureActive(.frequency, active: FrequencyPanelController.isVisible)
         case .groupBy:
             if isActive {
-                guard let session = tab.fileSession else { return }
+                guard let session = tab.fileSession, session.isFullyLoaded else {
+                    tvc.analysisBar.setFeatureActive(.groupBy, active: false)
+                    return
+                }
                 GroupByPanelController.show(fileSession: session)
             } else {
                 GroupByPanelController.closeIfOpen()

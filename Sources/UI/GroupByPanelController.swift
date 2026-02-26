@@ -431,6 +431,9 @@ final class GroupByPanelController: NSWindowController, NSWindowDelegate {
     // MARK: - Actions
 
     @objc private func columnClicked(_ sender: Any?) {
+        // NSTableView fires action before doubleAction — skip single-click
+        // when a double-click is in progress to avoid adding to both zones.
+        guard let event = NSApp.currentEvent, event.clickCount == 1 else { return }
         let row = columnsTableView.clickedRow
         guard row >= 0, row < availableColumns.count else { return }
         let desc = availableColumns[row]
@@ -448,10 +451,13 @@ final class GroupByPanelController: NSWindowController, NSWindowDelegate {
         guard row >= 0, row < availableColumns.count else { return }
         let desc = availableColumns[row]
 
-        // Alternate action: categorical → Aggregations, numeric → Group By
+        // Undo the single-click addition (if it fired before clickCount was 2),
+        // then add to the alternate zone.
         if isDefaultGroupByColumn(desc) {
+            removeFromGroupBy(desc.name)
             addToAggregations(desc.name)
         } else {
+            removeFromAggregations(columnName: desc.name)
             addToGroupBy(desc.name)
         }
     }
@@ -584,6 +590,12 @@ final class GroupByPanelController: NSWindowController, NSWindowDelegate {
         aggregations.remove(at: index)
         refreshAggregationsPills()
         updateOpenButtonState()
+    }
+
+    /// Removes the most recently added aggregation for the given column name.
+    private func removeFromAggregations(columnName: String) {
+        guard let index = aggregations.lastIndex(where: { $0.columnName == columnName }) else { return }
+        removeFromAggregations(at: index)
     }
 
     private func updateAggregationFunction(at index: Int, to function: AggregationFunction) {
