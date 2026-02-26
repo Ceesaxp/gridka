@@ -389,6 +389,7 @@ final class FileSession {
                         totalFilteredRows: totalRows
                     )
                     self.rowCache.invalidateAll()
+                    self.invalidateColumnSummaries()
                     progress(1.0)
                     completion(.success(totalRows))
                 }
@@ -898,7 +899,9 @@ final class FileSession {
     func computeColumnSummaries() {
         guard isFullyLoaded else { return }
 
-        summaryGeneration += 1
+        // Clear stale cache immediately so the UI never shows old summaries
+        // from a previous dataset while new computation is in flight.
+        invalidateColumnSummaries()
         let generation = summaryGeneration
         let currentColumns = columns.filter { $0.name != "_gridka_rowid" }
         let currentTotalRows = totalRows
