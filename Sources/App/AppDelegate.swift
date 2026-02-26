@@ -61,9 +61,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMainMenu()
 
-        // Sync toolbar button when frequency panel closes via close button or Escape
+        // Sync toolbar button across all tabs when frequency panel closes
         FrequencyPanelController.onClose = { [weak self] in
-            self?.activeTab?.tableViewController?.analysisBar.setFeatureActive(.frequency, active: false)
+            guard let self = self else { return }
+            for tab in self.windowTabs.values {
+                tab.tableViewController?.analysisBar.setFeatureActive(.frequency, active: false)
+            }
         }
 
         if windowTabs.isEmpty {
