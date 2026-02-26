@@ -160,7 +160,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         win.tabbingMode = .preferred
         win.delegate = self
 
-        let contentView = DragDropView(frame: win.contentView!.bounds)
+        let contentView = DragDropView(frame: win.contentView?.bounds ?? win.frame)
         contentView.autoresizingMask = [.width, .height]
         contentView.onFileDrop = { [weak self, weak win] url in
             guard let self = self, let win = win else { return }

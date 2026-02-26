@@ -39,19 +39,20 @@ final class DetailPaneView: NSView {
         sv.hasVerticalScroller = true
         sv.hasHorizontalScroller = false
         sv.autohidesScrollers = true
-        let tv = sv.documentView as! NSTextView
-        tv.isEditable = false
-        tv.isSelectable = true
-        tv.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
-        tv.textColor = .labelColor
-        tv.drawsBackground = false
-        tv.textContainerInset = .zero
-        tv.textContainer?.lineFragmentPadding = 0
+        if let tv = sv.documentView as? NSTextView {
+            tv.isEditable = false
+            tv.isSelectable = true
+            tv.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+            tv.textColor = .labelColor
+            tv.drawsBackground = false
+            tv.textContainerInset = .zero
+            tv.textContainer?.lineFragmentPadding = 0
+        }
         return sv
     }()
 
-    private var valueTextView: NSTextView {
-        scrollView.documentView as! NSTextView
+    private var valueTextView: NSTextView? {
+        scrollView.documentView as? NSTextView
     }
 
     private let separator: NSBox = {
@@ -141,22 +142,22 @@ final class DetailPaneView: NSView {
             || valueString.hasPrefix("https://")
 
         if case .null = value {
-            valueTextView.textColor = .tertiaryLabelColor
+            valueTextView?.textColor = .tertiaryLabelColor
             let font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
             let descriptor = font.fontDescriptor.withSymbolicTraits(.italic)
-            valueTextView.font = NSFont(descriptor: descriptor, size: font.pointSize) ?? font
+            valueTextView?.font = NSFont(descriptor: descriptor, size: font.pointSize) ?? font
             charCountLabel.stringValue = ""
         } else {
-            valueTextView.textColor = .labelColor
+            valueTextView?.textColor = .labelColor
             if useMonospace {
-                valueTextView.font = NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+                valueTextView?.font = NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
             } else {
-                valueTextView.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+                valueTextView?.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
             }
         }
 
-        valueTextView.string = valueString
-        valueTextView.scrollToBeginningOfDocument(nil)
+        valueTextView?.string = valueString
+        valueTextView?.scrollToBeginningOfDocument(nil)
         needsLayout = true
     }
 

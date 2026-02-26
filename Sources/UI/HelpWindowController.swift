@@ -53,7 +53,10 @@ final class HelpWindowController: NSWindowController {
         let scrollView = NSTextView.scrollableTextView()
         scrollView.drawsBackground = false
 
-        let textView = scrollView.documentView as! NSTextView
+        guard let textView = scrollView.documentView as? NSTextView else {
+            item.view = scrollView
+            return item
+        }
         textView.isEditable = false
         textView.isSelectable = true
         textView.drawsBackground = false

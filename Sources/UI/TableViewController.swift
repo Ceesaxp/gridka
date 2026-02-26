@@ -2312,7 +2312,7 @@ private extension NSFont {
 private extension NSImage {
     /// Returns a copy of the image tinted with the specified color.
     func tinted(with color: NSColor) -> NSImage {
-        let tinted = self.copy() as! NSImage
+        guard let tinted = self.copy() as? NSImage else { return self }
         tinted.lockFocus()
         color.set()
         let imageRect = NSRect(origin: .zero, size: tinted.size)

@@ -490,7 +490,8 @@ final class FileSession {
 
                 DispatchQueue.main.async { progress(0.2) }
 
-                guard let content = String(data: fileData, encoding: swiftEncoding!) else {
+                guard let encoding = swiftEncoding,
+                      let content = String(data: fileData, encoding: encoding) else {
                     DispatchQueue.main.async {
                         completion(.failure(GridkaError.loadFailed("Cannot decode file with encoding \(encodingName)")))
                     }

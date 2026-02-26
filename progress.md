@@ -1504,3 +1504,22 @@
   - `columnConfigGeneration` is a lightweight guard — since both `configureColumns()` and `updateSparklines()` run on main thread, the generation check detects if a reconfigure happened between the async dispatch of `onSummariesComputed` and its execution
   - All column removal paths (configureColumns, removeComputedColumn, hideColumn) now consistently clear sparkline data before removal — this pattern should be followed for any future column removal code
 ----
+
+## 2026-02-26, 20:55 - US-104 - Eliminate force unwrap/cast crash points in hot paths
+- Audited entire Sources/ directory for force unwraps (`!.`, `!)`) and force casts (`as!`)
+- Found and fixed 6 sites across 5 files:
+  1. **AppDelegate.swift:163** — `win.contentView!.bounds` → `win.contentView?.bounds ?? win.frame` (nil-coalescing fallback)
+  2. **FileSession.swift:493** — `swiftEncoding!` → `guard let encoding = swiftEncoding` (guard-let unwrap; nil case was already handled by early return above but force unwrap was unnecessary)
+  3. **HelpWindowController.swift:56** — `scrollView.documentView as! NSTextView` → `guard let ... as? NSTextView` (early return with plain scrollView)
+  4. **DetailPaneView.swift:42** — `sv.documentView as! NSTextView` → `if let tv = sv.documentView as? NSTextView` (conditional config)
+  5. **DetailPaneView.swift:54** — `scrollView.documentView as! NSTextView` property → `as? NSTextView` returning `NSTextView?`, plus optional chaining at all 8 call sites
+  6. **TableViewController.swift:2315** — `self.copy() as! NSImage` → `guard let ... as? NSImage else { return self }` (returns original on copy failure)
+- All failures are now non-fatal: return fallback values or skip configuration gracefully
+- Files changed: Sources/App/AppDelegate.swift, Sources/Model/FileSession.swift, Sources/UI/HelpWindowController.swift, Sources/UI/DetailPaneView.swift, Sources/UI/TableViewController.swift, plans/prd.json
+- Build succeeds, all 71 tests pass
+- **Learnings for future iterations:**
+  - `NSTextView.scrollableTextView()` always returns an NSScrollView whose `documentView` is an NSTextView — the force cast is practically safe but unnecessary; `as?` costs nothing and prevents future crashes if AppKit internals change
+  - `NSCopying.copy()` returns `Any` — for NSImage this is always another NSImage, but `as?` with a fallback to `self` is strictly correct
+  - When changing a stored/computed property from non-optional to optional (e.g., `NSTextView` → `NSTextView?`), grep all usages and add `?.` optional chaining — the compiler will flag these as errors but it's easy to miss in large files
+  - The FileSession encoding path had a subtle redundancy: the nil case for `swiftEncoding` was handled by early return on line 476, so the force unwrap on line 493 could never actually crash at runtime — but replacing it with `guard let` makes the intent explicit and future-proof
+----
