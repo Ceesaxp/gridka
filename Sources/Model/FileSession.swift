@@ -1770,6 +1770,19 @@ final class FileSession {
 
         queryQueue.async { [weak self] in
             guard let self = self else { return }
+
+            // SAFETY: Wrap preview in a read-only transaction so that even if the
+            // expression contains injected statements (e.g. "; DELETE FROM data; --"),
+            // DuckDB will reject any write operations. The ROLLBACK in the defer
+            // ensures the transaction is always closed, even on error.
+            do {
+                try self.engine.execute("BEGIN TRANSACTION READ ONLY")
+            } catch {
+                DispatchQueue.main.async { completion(.failure(error)) }
+                return
+            }
+            defer { try? self.engine.execute("ROLLBACK") }
+
             do {
                 let result = try self.engine.execute(sql)
                 var colNames: [String] = []
