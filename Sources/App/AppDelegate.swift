@@ -1107,15 +1107,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         let startTime = CFAbsoluteTimeGetCurrent()
 
         // Re-fetch page 0 with the new computed column in the SELECT
-        session.fetchPage(index: 0) { result in
+        session.fetchPage(index: 0) { [weak self] result in
             let queryTime = CFAbsoluteTimeGetCurrent() - startTime
 
             switch result {
             case .success:
                 tvc.reloadVisibleRows()
                 tvc.statusBar.showQueryTime(queryTime)
-            case .failure:
-                break
+            case .failure(let error):
+                // Roll back: remove the computed column from state and UI
+                var rollbackState = session.viewState
+                rollbackState.computedColumns.removeAll { $0.name == name }
+                session.updateViewState(rollbackState)
+                tvc.removeComputedColumn(name: name)
+                self?.showError(error, context: "adding computed column")
             }
 
             tvc.statusBar.updateRowCount(

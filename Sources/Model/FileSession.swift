@@ -1855,6 +1855,10 @@ final class FileSession {
         let countChanged = newState.filters != viewState.filters
             || newState.searchTerm != viewState.searchTerm
         let computedColumnsChanged = newState.computedColumns != viewState.computedColumns
+        // Computed column changes affect count when a search term is active
+        // because search ORs across computed column aliases
+        let computedAffectsCount = computedColumnsChanged
+            && (newState.searchTerm ?? "").isEmpty == false
         let cacheInvalidated = countChanged
             || newState.sortColumns != viewState.sortColumns
             || computedColumnsChanged
@@ -1864,8 +1868,9 @@ final class FileSession {
         if cacheInvalidated {
             rowCache.invalidateAll()
         }
-        // Only re-query count when filters or search change (sort doesn't affect row count)
-        if countChanged {
+        // Re-query count when filters/search change, or when computed columns
+        // change while a search term is active (search includes computed aliases)
+        if countChanged || computedAffectsCount {
             requeryCount()
         }
     }

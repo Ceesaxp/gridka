@@ -603,4 +603,27 @@ final class QueryCoordinatorTests: XCTestCase {
         XCTAssert(sql.contains("CAST(\"greeting\" AS TEXT) ILIKE '%hello%'"), "Search should include computed column")
         XCTAssert(sql.contains("CAST(\"name\" AS TEXT) ILIKE '%hello%'"), "Search should include base columns")
     }
+
+    func testBuildWhereSQLExcludesComputedFiltersAndSearch() {
+        let state = ViewState(
+            sortColumns: [],
+            filters: [
+                ColumnFilter(column: "name", operator: .contains, value: .string("alice")),
+                ColumnFilter(column: "double_age", operator: .greaterThan, value: .number(50)),
+            ],
+            searchTerm: "test",
+            visibleRange: 0..<500,
+            totalFilteredRows: 100,
+            computedColumns: [ComputedColumn(name: "double_age", expression: "age * 2")]
+        )
+        let whereSQL = coordinator.buildWhereSQL(for: state, columns: sampleColumns)
+        // Base column filter should be included
+        XCTAssert(whereSQL.contains("\"name\" ILIKE"), "Base column filter should be present")
+        // Computed column filter should be excluded
+        XCTAssertFalse(whereSQL.contains("\"double_age\""), "Computed column filter should be excluded from profiler WHERE")
+        // Computed column should not appear in search
+        XCTAssertFalse(whereSQL.contains("\"double_age\""), "Computed column should be excluded from profiler search")
+        // Base column search should still work
+        XCTAssert(whereSQL.contains("CAST(\"name\" AS TEXT) ILIKE '%test%'"), "Base column search should be present")
+    }
 }

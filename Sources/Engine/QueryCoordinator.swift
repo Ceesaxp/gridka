@@ -57,10 +57,10 @@ final class QueryCoordinator {
     /// Returns an empty string if no conditions apply. Used by ProfilerQueryBuilder to include
     /// the same filter/search conditions in profiler queries.
     ///
-    /// **Note:** This excludes computed columns from the search condition because profiler
+    /// **Note:** This excludes computed columns from both search and filters because profiler
     /// queries run against bare `FROM data` where computed column aliases don't exist.
     func buildWhereSQL(for state: ViewState, columns: [ColumnDescriptor]) -> String {
-        return buildWhereClause(for: state, columns: columns, includeComputedInSearch: false)
+        return buildWhereClause(for: state, columns: columns, includeComputed: false)
     }
 
     // MARK: - Private Builders
@@ -75,17 +75,23 @@ final class QueryCoordinator {
         return "(SELECT *, \(computedParts.joined(separator: ", ")) FROM data)"
     }
 
-    private func buildWhereClause(for state: ViewState, columns: [ColumnDescriptor], includeComputedInSearch: Bool = true) -> String {
+    /// - Parameter includeComputed: When false, filters on computed columns are excluded
+    ///   and search does not include computed column aliases. Used by `buildWhereSQL` for
+    ///   profiler queries that run against bare `FROM data`.
+    private func buildWhereClause(for state: ViewState, columns: [ColumnDescriptor], includeComputed: Bool = true) -> String {
         var conditions: [String] = []
 
+        let computedNames = Set(state.computedColumns.map(\.name))
         for filter in state.filters {
+            // Skip filters on computed columns when querying bare data table
+            if !includeComputed && computedNames.contains(filter.column) { continue }
             if let sql = buildFilterCondition(filter) {
                 conditions.append(sql)
             }
         }
 
         if let searchTerm = state.searchTerm, !searchTerm.isEmpty {
-            let computedCols = includeComputedInSearch ? state.computedColumns : []
+            let computedCols = includeComputed ? state.computedColumns : []
             let searchCondition = buildSearchCondition(searchTerm, columns: columns, computedColumns: computedCols)
             if !searchCondition.isEmpty {
                 conditions.append("(\(searchCondition))")
