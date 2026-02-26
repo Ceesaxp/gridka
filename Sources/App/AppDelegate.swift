@@ -106,9 +106,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             }
         }
 
-        // US-021: Open as New Tab callback (placeholder — implemented in US-023)
+        // US-023: Open Group By results as new tab
         GroupByPanelController.onOpenAsNewTab = { [weak self] definition, session in
-            NSLog("Group By: Open as New Tab requested with \(definition.groupByColumns.count) group columns and \(definition.aggregations.count) aggregations")
+            self?.openGroupBySummary(definition: definition, sourceSession: session)
         }
 
         if windowTabs.isEmpty {
@@ -616,6 +616,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             }
         } catch {
             showError(error, context: "opening file")
+        }
+    }
+
+    // MARK: - Group By Summary Tab (US-023)
+
+    /// Creates a new tab with the full Group By aggregation results.
+    private func openGroupBySummary(definition: GroupByDefinition, sourceSession: FileSession) {
+        guard let parentWindow = activeWindow else { return }
+
+        // Build tab title from group-by column names
+        let groupNames = definition.groupByColumns.joined(separator: ", ")
+        let tabTitle = groupNames.isEmpty ? "Summary: overall" : "Summary: by \(groupNames)"
+
+        FileSession.createSummarySession(from: sourceSession, definition: definition) { [weak self] result in
+            guard let self = self else { return }
+            switch result {
+            case .success(let summarySession):
+                let newWin = self.createWindow()
+                let newTab = TabContext()
+                self.windowTabs[newWin] = newTab
+                newTab.fileSession = summarySession
+                newWin.title = tabTitle
+
+                parentWindow.addTabbedWindow(newWin, ordered: .above)
+                newWin.makeKeyAndOrderFront(nil)
+
+                self.showTableView(in: newWin, tab: newTab)
+
+                let tvc = newTab.tableViewController
+                tvc?.fileSession = summarySession
+                tvc?.configureColumns(summarySession.columns)
+                tvc?.autoFitAllColumns()
+
+                // Status bar shows group count
+                tvc?.statusBar.updateRowCount(
+                    showing: summarySession.totalRows,
+                    total: summarySession.totalRows
+                )
+
+                self.rebalanceMemoryLimits()
+
+            case .failure(let error):
+                self.showError(error, context: "creating Group By summary")
+            }
         }
     }
 
@@ -1709,6 +1753,9 @@ extension AppDelegate: NSWindowDelegate {
         guard let tab = windowTabs[sender] else { return true }
         guard let session = tab.fileSession else { return true }
 
+        // Summary tabs (Group By results) have no unsaved state — always close immediately
+        if session.isSummarySession { return true }
+
         let hasUnsavedEdits = session.isModified
         let hasComputedColumns = !session.viewState.computedColumns.isEmpty
 
@@ -1854,6 +1901,9 @@ extension AppDelegate: NSWindowDelegate {
                 FrequencyPanelController.closeIfOwned(by: session)
                 ComputedColumnPanelController.closeIfOwned(by: session)
                 GroupByPanelController.closeIfOwned(by: session)
+
+                // Drop the temp table when closing a summary tab (US-023)
+                session.dropSummaryTable()
             }
             tab.tableViewController?.tearDown()
             tab.fileSession?.onModifiedChanged = nil

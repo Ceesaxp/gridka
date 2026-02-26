@@ -2,6 +2,10 @@ import Foundation
 
 final class QueryCoordinator {
 
+    /// The base table name for queries. Defaults to "data" for regular file sessions.
+    /// Summary sessions (Group By results) set this to their temp table name.
+    var tableName: String = "data"
+
     // MARK: - Public Query Builders
 
     func buildQuery(for state: ViewState, columns: [ColumnDescriptor], range: Range<Int>) -> String {
@@ -68,11 +72,11 @@ final class QueryCoordinator {
     /// Used by ProfilerQueryBuilder alongside `buildWhereSQL` so that computed column
     /// aliases are available for filters and search.
     func buildSourceExpression(for state: ViewState) -> String {
-        guard !state.computedColumns.isEmpty else { return "data" }
+        guard !state.computedColumns.isEmpty else { return tableName }
         let computedParts = state.computedColumns.map { cc in
             "(\(cc.expression)) AS \(QueryCoordinator.quote(cc.name))"
         }
-        return "(SELECT *, \(computedParts.joined(separator: ", ")) FROM data)"
+        return "(SELECT *, \(computedParts.joined(separator: ", ")) FROM \(tableName))"
     }
 
     private func buildWhereClause(for state: ViewState, columns: [ColumnDescriptor]) -> String {

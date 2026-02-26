@@ -1406,3 +1406,30 @@
   - For the count query with no group-by columns, `SELECT 1` correctly returns 1 group (the overall aggregation row)
   - The FileSession.fetchGroupByPreview uses the same queryCoordinator.buildSourceExpression + buildWhereSQL to respect computed columns and active filters
 ----
+
+## 2026-02-26, 20:05 - US-023 - Open Group By results as new tab
+- Added summary session support to FileSession:
+  - `summaryTableName: String?` property and `isSummarySession` computed property
+  - Static `createSummarySession(from:definition:completion:)` factory method that shares the source session's DuckDB engine and queryQueue, creates a `CREATE TEMP TABLE summary_N AS SELECT ...` with the Group By aggregation, extracts column metadata, and returns a pre-configured FileSession
+  - `dropSummaryTable()` method that executes `DROP TABLE IF EXISTS` on the shared queryQueue
+  - Static `summaryCounter` for unique temp table names (summary_1, summary_2, ...)
+  - Changed `queryQueue` from `let` with inline init to `let` with init-time assignment to support both regular and summary session inits
+- Added `openGroupBySummary(definition:sourceSession:)` to AppDelegate:
+  - Replaces the placeholder `onOpenAsNewTab` callback from US-021
+  - Creates a summary session via the factory method
+  - Opens a new tab window with title "Summary: by column1, column2" (or "Summary: overall" when no group-by columns)
+  - Sets up TableViewController with configureColumns + autoFitAllColumns
+  - Status bar shows total group count
+  - Rebalances memory limits across all tabs
+- Updated windowWillClose to call `session.dropSummaryTable()` for temp table cleanup
+- Updated windowShouldClose to skip save/computed-column prompts for summary sessions (`isSummarySession` early return)
+- Summary tabs support full table functionality: sorting, filtering, searching, Profiler, Frequency analysis
+- Files changed: Sources/Model/FileSession.swift, Sources/App/AppDelegate.swift, plans/prd.json
+- Build succeeds, all 71 tests pass
+- **Learnings for future iterations:**
+  - Summary sessions share the DuckDB engine and queryQueue with their source session — the engine stays alive via ARC reference counting as long as any session holds a reference. This means closing the source tab before the summary tab is safe.
+  - DuckDB temp tables (`CREATE TEMP TABLE`) are scoped to the connection, so they're visible to both source and summary sessions sharing the same engine/connection. No need for regular tables.
+  - The `queryQueue` declaration was changed from inline-initialized `let` to init-assigned `let` to support the private summary init. This is a non-breaking change since DispatchQueue is a reference type.
+  - The existing `tableName` property on FileSession (defaulting to "data") naturally supports summary sessions — QueryCoordinator's `buildSourceExpression` returns "data" for non-computed-column queries, but for summary sessions the tableName is set to the temp table name directly, and since summary sessions have no computed columns, the query simply becomes `SELECT * FROM summary_N`.
+  - The rebalanceMemoryLimits doesn't double-count summary sessions that share an engine — memory limit SET calls go through the shared queryQueue and engine, so the last-applied limit wins. This is acceptable since summary tabs use negligible memory compared to source data.
+----

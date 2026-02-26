@@ -14,7 +14,7 @@ final class FileSession {
     private let engine: DuckDBEngine
     private let queryCoordinator = QueryCoordinator()
     private let profilerQueryBuilder = ProfilerQueryBuilder()
-    private let queryQueue = DispatchQueue(label: "com.gridka.query-queue")
+    private let queryQueue: DispatchQueue
 
     /// Generation counter for profiler queries. Incremented when column selection or
     /// filter/search state changes. Results with a stale generation are discarded.
@@ -87,6 +87,16 @@ final class FileSession {
         return overrideEncoding ?? detectedEncoding
     }
 
+    /// Name of the summary temp table (non-nil only for summary sessions created by Group By).
+    /// Summary sessions share the engine and queryQueue with their source session.
+    private(set) var summaryTableName: String?
+
+    /// Whether this is a summary session (Group By result tab).
+    var isSummarySession: Bool { summaryTableName != nil }
+
+    /// Counter for unique summary table names across the app lifetime.
+    private static var summaryCounter = 0
+
     // MARK: - Init
 
     init(filePath: URL) throws {
@@ -94,6 +104,7 @@ final class FileSession {
             throw GridkaError.fileNotFound(filePath.path)
         }
         self.filePath = filePath
+        self.queryQueue = DispatchQueue(label: "com.gridka.query-queue")
         self.viewState = ViewState(
             sortColumns: [],
             filters: [],
@@ -102,6 +113,111 @@ final class FileSession {
             totalFilteredRows: 0
         )
         self.engine = try DuckDBEngine()
+    }
+
+    /// Private init for summary sessions that share an existing engine and queryQueue.
+    private init(engine: DuckDBEngine, queryQueue: DispatchQueue, summaryTableName: String, filePath: URL) {
+        self.engine = engine
+        self.queryQueue = queryQueue
+        self.summaryTableName = summaryTableName
+        self.tableName = summaryTableName
+        self.filePath = filePath
+        self.viewState = ViewState(
+            sortColumns: [],
+            filters: [],
+            searchTerm: nil,
+            visibleRange: 0..<0,
+            totalFilteredRows: 0
+        )
+        self.isFullyLoaded = true
+        // Route all queries to the summary temp table instead of "data"
+        self.queryCoordinator.tableName = summaryTableName
+    }
+
+    // MARK: - Summary Session Factory (US-023)
+
+    /// Creates a summary session backed by a temp table with Group By results.
+    /// The summary session shares the source session's DuckDB engine and queryQueue.
+    /// Runs the aggregation query on the source's queryQueue; calls completion on main thread.
+    static func createSummarySession(
+        from sourceSession: FileSession,
+        definition: GroupByDefinition,
+        completion: @escaping (Result<FileSession, Error>) -> Void
+    ) {
+        summaryCounter += 1
+        let tempName = "summary_\(summaryCounter)"
+
+        let source = sourceSession.queryCoordinator.buildSourceExpression(for: sourceSession.viewState)
+        let whereClause = sourceSession.queryCoordinator.buildWhereSQL(for: sourceSession.viewState, columns: sourceSession.columns)
+        let whereSQL = whereClause.isEmpty ? "" : " WHERE \(whereClause)"
+
+        // Build SELECT clause: group-by columns + aggregation expressions
+        var selectParts: [String] = []
+        for col in definition.groupByColumns {
+            selectParts.append(QueryCoordinator.quote(col))
+        }
+        for agg in definition.aggregations {
+            let fn = agg.function.rawValue
+            let colExpr = agg.columnName == "*" ? "*" : QueryCoordinator.quote(agg.columnName)
+            let alias = agg.columnName == "*"
+                ? "\(fn)(*)"
+                : "\(fn)(\(agg.columnName))"
+            selectParts.append("\(fn)(\(colExpr)) AS \(QueryCoordinator.quote(alias))")
+        }
+
+        let groupBySQL: String
+        if definition.groupByColumns.isEmpty {
+            groupBySQL = ""
+        } else {
+            let groupCols = definition.groupByColumns.map { QueryCoordinator.quote($0) }.joined(separator: ", ")
+            groupBySQL = " GROUP BY \(groupCols)"
+        }
+
+        let createSQL = "CREATE TEMP TABLE \(QueryCoordinator.quote(tempName)) AS SELECT \(selectParts.joined(separator: ", ")) FROM \(source)\(whereSQL)\(groupBySQL)"
+        let countSQL = "SELECT COUNT(*) FROM \(QueryCoordinator.quote(tempName))"
+
+        sourceSession.queryQueue.async {
+            do {
+                try sourceSession.engine.execute(createSQL)
+                let countResult = try sourceSession.engine.execute(countSQL)
+
+                let totalRows: Int
+                if countResult.rowCount > 0, case .integer(let val) = countResult.value(row: 0, col: 0) {
+                    totalRows = Int(val)
+                } else {
+                    totalRows = 0
+                }
+
+                // Extract column metadata from the temp table
+                let colResult = try sourceSession.engine.execute("SELECT * FROM \(QueryCoordinator.quote(tempName)) LIMIT 0")
+                let cols = sourceSession.extractColumns(from: colResult)
+
+                DispatchQueue.main.async {
+                    let session = FileSession(
+                        engine: sourceSession.engine,
+                        queryQueue: sourceSession.queryQueue,
+                        summaryTableName: tempName,
+                        filePath: sourceSession.filePath
+                    )
+                    session.columns = cols
+                    session.totalRows = totalRows
+                    session.viewState.totalFilteredRows = totalRows
+                    completion(.success(session))
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    completion(.failure(error))
+                }
+            }
+        }
+    }
+
+    /// Drops the summary temp table. Called when a summary tab is closed.
+    func dropSummaryTable() {
+        guard let name = summaryTableName else { return }
+        queryQueue.async { [weak self] in
+            try? self?.engine.execute("DROP TABLE IF EXISTS \(QueryCoordinator.quote(name))")
+        }
     }
 
     // MARK: - Memory Management

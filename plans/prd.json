@@ -392,7 +392,7 @@
                 "Compiles and runs without crashes"
             ],
             "priority": 23,
-            "passes": false,
+            "passes": true,
             "notes": "Create the temp table on the serial DuckDB queue, then open a new tab pointing to it. The tab's FileSession (or a new SummarySession) should track the temp table name. On tab close, drop the temp table. Use an incrementing counter for unique temp table names (summary_1, summary_2, etc.)."
         },
         {
