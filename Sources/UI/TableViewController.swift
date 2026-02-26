@@ -1071,9 +1071,10 @@ final class TableViewController: NSViewController {
         let rowCount = session.viewState.totalFilteredRows
         guard columnCount > 0, rowCount > 0 else { return }
 
-        // Build list of editable column indices (skip _gridka_rowid)
+        // Build list of editable column indices (skip _gridka_rowid and computed columns)
         let editableColumns: [Int] = (0..<columnCount).filter { i in
-            tableView.tableColumns[i].identifier.rawValue != "_gridka_rowid"
+            let name = tableView.tableColumns[i].identifier.rawValue
+            return name != "_gridka_rowid" && !computedColumnNames.contains(name)
         }
         guard !editableColumns.isEmpty else { return }
 
