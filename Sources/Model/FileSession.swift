@@ -132,6 +132,7 @@ final class FileSession {
         self.isFullyLoaded = true
         // Route all queries to the summary temp table instead of "data"
         self.queryCoordinator.tableName = summaryTableName
+        self.profilerQueryBuilder.tableName = summaryTableName
     }
 
     // MARK: - Summary Session Factory (US-023)
@@ -213,10 +214,13 @@ final class FileSession {
     }
 
     /// Drops the summary temp table. Called when a summary tab is closed.
+    /// Uses strong captures so the engine stays alive until the DROP executes,
+    /// even if the FileSession is deallocated before the queue runs.
     func dropSummaryTable() {
         guard let name = summaryTableName else { return }
-        queryQueue.async { [weak self] in
-            try? self?.engine.execute("DROP TABLE IF EXISTS \(QueryCoordinator.quote(name))")
+        let engine = self.engine
+        queryQueue.async {
+            try? engine.execute("DROP TABLE IF EXISTS \(QueryCoordinator.quote(name))")
         }
     }
 

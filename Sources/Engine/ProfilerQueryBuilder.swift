@@ -6,6 +6,13 @@ final class ProfilerQueryBuilder {
 
     private let queryCoordinator = QueryCoordinator()
 
+    /// The base table name for queries. Must be kept in sync with the owning
+    /// FileSession's QueryCoordinator so profiler queries target the right table.
+    var tableName: String {
+        get { queryCoordinator.tableName }
+        set { queryCoordinator.tableName = newValue }
+    }
+
     /// Builds the overview stats query for a column: row count, unique count, null count, empty count.
     /// Returns a single-row result with 4 columns: total_rows, unique_count, null_count, empty_count.
     func buildOverviewQuery(columnName: String, viewState: ViewState, columns: [ColumnDescriptor]) -> String {
@@ -230,7 +237,7 @@ final class ProfilerQueryBuilder {
             .filter { $0.name != "_gridka_rowid" }
             .map { col in
                 let q = QueryCoordinator.quote(col.name)
-                return "SELECT '\(col.name.replacingOccurrences(of: "'", with: "''"))' AS col_name, COUNT(DISTINCT \(q)) AS distinct_count, COUNT(*) - COUNT(\(q)) AS null_count FROM data"
+                return "SELECT '\(col.name.replacingOccurrences(of: "'", with: "''"))' AS col_name, COUNT(DISTINCT \(q)) AS distinct_count, COUNT(*) - COUNT(\(q)) AS null_count FROM \(self.tableName)"
             }
         return cases.joined(separator: " UNION ALL ")
     }
@@ -241,7 +248,7 @@ final class ProfilerQueryBuilder {
         return """
         WITH bounds AS ( \
         SELECT MIN(\(col)) AS col_min, MAX(\(col)) AS col_max \
-        FROM data WHERE \(col) IS NOT NULL \
+        FROM \(tableName) WHERE \(col) IS NOT NULL \
         ), \
         bucketed AS ( \
         SELECT \
@@ -250,7 +257,7 @@ final class ProfilerQueryBuilder {
         WIDTH_BUCKET(\(col)::DOUBLE, bounds.col_min::DOUBLE, bounds.col_max::DOUBLE + 1e-9, \(bucketCount)) \
         )) END AS bucket, \
         bounds.col_min, bounds.col_max \
-        FROM data, bounds \
+        FROM \(tableName), bounds \
         WHERE \(col) IS NOT NULL \
         ) \
         SELECT \
@@ -269,7 +276,7 @@ final class ProfilerQueryBuilder {
         let col = QueryCoordinator.quote(columnName)
         return """
         SELECT CAST(\(col) AS VARCHAR) AS val, COUNT(*) AS cnt \
-        FROM data \
+        FROM \(tableName) \
         WHERE \(col) IS NOT NULL \
         GROUP BY \(col) \
         ORDER BY cnt DESC \
@@ -284,7 +291,7 @@ final class ProfilerQueryBuilder {
         SELECT \
         SUM(CASE WHEN \(col) = true THEN 1 ELSE 0 END) AS true_count, \
         SUM(CASE WHEN \(col) = false THEN 1 ELSE 0 END) AS false_count \
-        FROM data
+        FROM \(tableName)
         """
     }
 }

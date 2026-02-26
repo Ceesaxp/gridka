@@ -728,6 +728,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
         tvc.onCellEdited = { [weak self, weak tvc] rowid, columnName, newValue, displayRow in
             guard let self = self, let tvc = tvc, let tab = self.tab(for: tvc) else { return }
+            guard tab.fileSession?.isSummarySession != true else { return }
             self.handleCellEdited(tab: tab, rowid: rowid, columnName: columnName, newValue: newValue, displayRow: displayRow)
         }
 
@@ -1624,24 +1625,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         let session = activeTab?.fileSession
         let tvc = activeTab?.tableViewController
+        let isSummary = session?.isSummarySession ?? false
 
         if menuItem.action == #selector(saveDocument(_:)) {
-            return session?.isModified ?? false
+            return !isSummary && (session?.isModified ?? false)
         }
         if menuItem.action == #selector(saveAsDocument(_:)) {
-            return session?.isFullyLoaded ?? false
+            return !isSummary && (session?.isFullyLoaded ?? false)
         }
         if menuItem.action == #selector(addColumnAction(_:)) {
-            return session?.isFullyLoaded ?? false
+            return !isSummary && (session?.isFullyLoaded ?? false)
         }
         if menuItem.action == #selector(addComputedColumnAction(_:)) {
-            return session?.isFullyLoaded ?? false
+            return !isSummary && (session?.isFullyLoaded ?? false)
         }
         if menuItem.action == #selector(groupByAction(_:)) {
-            return session?.isFullyLoaded ?? false
+            return !isSummary && (session?.isFullyLoaded ?? false)
         }
         if menuItem.action == #selector(renameColumnAction(_:)) {
-            guard session?.isFullyLoaded ?? false else {
+            guard !isSummary, session?.isFullyLoaded ?? false else {
                 menuItem.title = "Rename Column…"
                 return false
             }
@@ -1654,7 +1656,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             return false
         }
         if menuItem.action == #selector(deleteColumnAction(_:)) {
-            guard session?.isFullyLoaded ?? false else {
+            guard !isSummary, session?.isFullyLoaded ?? false else {
                 menuItem.title = "Delete Column"
                 return false
             }
@@ -1667,21 +1669,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             return false
         }
         if menuItem.action == #selector(addRowAction(_:)) {
-            return session?.isFullyLoaded ?? false
+            return !isSummary && (session?.isFullyLoaded ?? false)
         }
         if menuItem.action == #selector(deleteRowsAction(_:)) {
+            if isSummary { return false }
             guard session?.isFullyLoaded ?? false else { return false }
             return (tvc?.tableView.selectedRowIndexes.isEmpty == false)
         }
         if menuItem.action == #selector(toggleHeaderAction(_:)) {
             menuItem.state = (session?.hasHeaders ?? true) ? .on : .off
-            return session?.isFullyLoaded ?? false
+            return !isSummary && (session?.isFullyLoaded ?? false)
         }
         if menuItem.action == #selector(toggleRowNumbersAction(_:)) {
             menuItem.state = (tvc?.isRowNumbersVisible ?? false) ? .on : .off
             return tvc != nil
         }
         if menuItem.action == #selector(changeDelimiterAction(_:)) {
+            if isSummary { return false }
             guard let delim = menuItem.representedObject as? String else { return false }
             let effective = session?.customDelimiter
             if delim.isEmpty {
@@ -1693,11 +1697,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             return session?.isFullyLoaded ?? false
         }
         if menuItem.action == #selector(changeEncodingAction(_:)) {
+            if isSummary { return false }
             guard let encName = menuItem.representedObject as? String else { return false }
             menuItem.state = (encName == session?.activeEncodingName) ? .on : .off
             return session?.isFullyLoaded ?? false
         }
         if menuItem.action == #selector(customDelimiterAction(_:)) {
+            if isSummary { return false }
             // Check if current delimiter is a custom one not in the standard list
             if let effective = session?.customDelimiter,
                ![",", "\t", ";", "|", "~"].contains(effective) {
