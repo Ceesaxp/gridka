@@ -118,6 +118,8 @@ final class FrequencyPanelController: NSWindowController, NSWindowDelegate {
     private let isNumericColumn: Bool
     /// Whether bin mode is active.
     private var isBinned: Bool = false
+    /// Cached max count across all rows (computed once per data load, not per cell render).
+    private var cachedMaxCount: Int = 1
 
     private struct FrequencyRow {
         let rank: Int
@@ -284,6 +286,7 @@ final class FrequencyPanelController: NSWindowController, NSWindowDelegate {
             allRows = data.rows.enumerated().map { (i, row) in
                 FrequencyRow(rank: i + 1, value: row.value, count: row.count, percentage: row.percentage)
             }
+            cachedMaxCount = allRows.map(\.count).max() ?? 1
             sortAndReload()
             let groupLabel = isBinned ? "bins" : "distinct values"
             statusLabel.stringValue = "\(allRows.count) \(groupLabel)"
@@ -302,21 +305,22 @@ final class FrequencyPanelController: NSWindowController, NSWindowDelegate {
     // MARK: - Sorting
 
     private func sortAndReload() {
+        let asc = sortAscending
+        let col = sortColumn
         displayRows = allRows.sorted { a, b in
-            let result: Bool
-            switch sortColumn {
+            switch col {
             case "rank":
-                result = a.rank < b.rank
+                return asc ? a.rank < b.rank : a.rank > b.rank
             case "value":
-                result = a.value.localizedCaseInsensitiveCompare(b.value) == .orderedAscending
+                let cmp = a.value.localizedCaseInsensitiveCompare(b.value)
+                return asc ? cmp == .orderedAscending : cmp == .orderedDescending
             case "cnt":
-                result = a.count < b.count
+                return asc ? a.count < b.count : a.count > b.count
             case "pct":
-                result = a.percentage < b.percentage
+                return asc ? a.percentage < b.percentage : a.percentage > b.percentage
             default:
-                result = a.count < b.count
+                return asc ? a.count < b.count : a.count > b.count
             }
-            return sortAscending ? result : !result
         }
         tableView.reloadData()
     }
@@ -430,10 +434,9 @@ extension FrequencyPanelController: NSTableViewDelegate {
 
         case "cnt":
             let cell = reuseOrCreateBarCell(tableView: tableView, id: id)
-            let maxCount = displayRows.first(where: { _ in true }).map({ _ in allRows.map(\.count).max() ?? 1 }) ?? 1
             cell.configure(
                 count: freqRow.count,
-                maxCount: maxCount,
+                maxCount: cachedMaxCount,
                 formattedCount: countFormatter.string(from: NSNumber(value: freqRow.count)) ?? "\(freqRow.count)"
             )
             return cell
