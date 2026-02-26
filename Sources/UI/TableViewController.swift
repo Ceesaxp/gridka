@@ -765,7 +765,9 @@ final class TableViewController: NSViewController {
                     ) { [weak self] tvResult in
                         guard let self = self else { return }
                         if case .success(let data) = tvResult {
-                            if data.isAllUnique {
+                            if data.isAllNull {
+                                self.profilerSidebar.hideTopValuesSection()
+                            } else if data.isAllUnique {
                                 self.profilerSidebar.showAllUniqueMessage(uniqueCount: data.uniqueCount)
                             } else {
                                 let viewRows = data.rows.map {

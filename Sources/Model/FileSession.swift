@@ -1147,6 +1147,7 @@ final class FileSession {
         let rows: [ValueRow]
         let isAllUnique: Bool
         let uniqueCount: Int
+        var isAllNull: Bool = false
     }
 
     /// Fetches the top 10 most frequent values for a column.
@@ -1164,7 +1165,17 @@ final class FileSession {
         // uniqueCount is COUNT(DISTINCT col) which excludes NULLs,
         // so compare against totalRows minus nullCount.
         let nonNullRows = totalRows - nullCount
-        if uniqueCount >= nonNullRows && nonNullRows > 0 {
+
+        // All-NULL column: no non-null values to show
+        if nonNullRows <= 0 {
+            DispatchQueue.main.async {
+                guard self.profilerGeneration == generation else { return }
+                completion(.success(TopValuesData(rows: [], isAllUnique: false, uniqueCount: 0, isAllNull: true)))
+            }
+            return
+        }
+
+        if uniqueCount >= nonNullRows {
             DispatchQueue.main.async {
                 guard self.profilerGeneration == generation else { return }
                 completion(.success(TopValuesData(rows: [], isAllUnique: true, uniqueCount: uniqueCount)))
@@ -1199,7 +1210,7 @@ final class FileSession {
                     if case .integer(let v) = result.value(row: row, col: 1) { count = Int(v) }
                     else { continue }
 
-                    let pct = totalRows > 0 ? Double(count) / Double(totalRows) * 100 : 0
+                    let pct = nonNullRows > 0 ? Double(count) / Double(nonNullRows) * 100 : 0
                     rows.append(TopValuesData.ValueRow(value: label, count: count, percentage: pct))
                 }
 
