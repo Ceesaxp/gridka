@@ -5,6 +5,7 @@ import AppKit
 /// or keyboard shortcut Opt+Cmd+F.
 ///
 /// US-017: Dialog with expression editor and function hint chips.
+/// US-018: Live preview table showing first 5 rows with debounced updates.
 final class ComputedColumnPanelController: NSWindowController, NSWindowDelegate {
 
     private static var shared: ComputedColumnPanelController?
@@ -58,14 +59,14 @@ final class ComputedColumnPanelController: NSWindowController, NSWindowDelegate 
         self.existingColumnNames = Set(fileSession.columns.map(\.name))
 
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 420),
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 560),
             styleMask: [.titled, .closable, .resizable, .utilityWindow, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
         panel.isReleasedWhenClosed = false
         panel.title = "Add Computed Column"
-        panel.minSize = NSSize(width: 400, height: 340)
+        panel.minSize = NSSize(width: 400, height: 420)
         panel.level = .floating
         panel.isFloatingPanel = true
         panel.becomesKeyOnlyIfNeeded = true
@@ -98,6 +99,18 @@ final class ComputedColumnPanelController: NSWindowController, NSWindowDelegate 
     private var expressionScrollView: NSScrollView!
     private var errorLabel: NSTextField!
     private var addButton: NSButton!
+
+    // MARK: - Preview Components (US-018)
+
+    private var previewLabel: NSTextField!
+    private var previewTableView: NSTableView!
+    private var previewScrollView: NSScrollView!
+    private var previewContainer: NSView!
+    private var previewDebounceWorkItem: DispatchWorkItem?
+    /// Column names from the last successful preview result.
+    private var previewColumnNames: [String] = []
+    /// Row data from the last successful preview result.
+    private var previewRows: [[String]] = []
 
     // MARK: - Function Hint Chips
 
@@ -190,6 +203,46 @@ final class ComputedColumnPanelController: NSWindowController, NSWindowDelegate 
         errorLabel.preferredMaxLayoutWidth = 460
         contentView.addSubview(errorLabel)
 
+        // --- Preview Section (US-018) ---
+        previewLabel = NSTextField(labelWithString: "PREVIEW")
+        previewLabel.font = NSFont.systemFont(ofSize: 10, weight: .semibold)
+        previewLabel.textColor = .tertiaryLabelColor
+        previewLabel.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(previewLabel)
+
+        previewContainer = NSView()
+        previewContainer.translatesAutoresizingMaskIntoConstraints = false
+        previewContainer.isHidden = true
+        contentView.addSubview(previewContainer)
+
+        previewTableView = NSTableView()
+        previewTableView.style = .plain
+        previewTableView.usesAlternatingRowBackgroundColors = true
+        previewTableView.rowHeight = 18
+        previewTableView.intercellSpacing = NSSize(width: 8, height: 2)
+        previewTableView.headerView = NSTableHeaderView()
+        previewTableView.dataSource = self
+        previewTableView.delegate = self
+        previewTableView.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+        previewTableView.allowsColumnResizing = true
+        previewTableView.focusRingType = .none
+
+        previewScrollView = NSScrollView()
+        previewScrollView.documentView = previewTableView
+        previewScrollView.hasVerticalScroller = false
+        previewScrollView.hasHorizontalScroller = false
+        previewScrollView.autohidesScrollers = true
+        previewScrollView.borderType = .bezelBorder
+        previewScrollView.translatesAutoresizingMaskIntoConstraints = false
+        previewContainer.addSubview(previewScrollView)
+
+        NSLayoutConstraint.activate([
+            previewScrollView.leadingAnchor.constraint(equalTo: previewContainer.leadingAnchor),
+            previewScrollView.trailingAnchor.constraint(equalTo: previewContainer.trailingAnchor),
+            previewScrollView.topAnchor.constraint(equalTo: previewContainer.topAnchor),
+            previewScrollView.bottomAnchor.constraint(equalTo: previewContainer.bottomAnchor),
+        ])
+
         // --- Buttons ---
         let cancelButton = NSButton(title: "Cancel", target: self, action: #selector(cancelClicked))
         cancelButton.translatesAutoresizingMaskIntoConstraints = false
@@ -221,7 +274,7 @@ final class ComputedColumnPanelController: NSWindowController, NSWindowDelegate 
             expressionScrollView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
             expressionScrollView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
             expressionScrollView.topAnchor.constraint(equalTo: exprLabel.bottomAnchor, constant: 6),
-            expressionScrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 80),
+            expressionScrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 60),
 
             // Hints label
             hintsLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
@@ -237,9 +290,20 @@ final class ComputedColumnPanelController: NSWindowController, NSWindowDelegate 
             errorLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
             errorLabel.topAnchor.constraint(equalTo: chipsContainer.bottomAnchor, constant: 8),
 
+            // Preview label
+            previewLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
+            previewLabel.topAnchor.constraint(equalTo: errorLabel.bottomAnchor, constant: 12),
+
+            // Preview container
+            previewContainer.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
+            previewContainer.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
+            previewContainer.topAnchor.constraint(equalTo: previewLabel.bottomAnchor, constant: 4),
+            previewContainer.heightAnchor.constraint(equalToConstant: 120),
+
             // Buttons
             addButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
             addButton.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -16),
+            addButton.topAnchor.constraint(greaterThanOrEqualTo: previewContainer.bottomAnchor, constant: 12),
 
             cancelButton.trailingAnchor.constraint(equalTo: addButton.leadingAnchor, constant: -8),
             cancelButton.centerYAnchor.constraint(equalTo: addButton.centerYAnchor),
@@ -249,9 +313,12 @@ final class ComputedColumnPanelController: NSWindowController, NSWindowDelegate 
         ])
 
         // Make the expression area expand when window resizes
-        let exprExpandConstraint = expressionScrollView.heightAnchor.constraint(equalToConstant: 120)
+        let exprExpandConstraint = expressionScrollView.heightAnchor.constraint(equalToConstant: 80)
         exprExpandConstraint.priority = .defaultLow
         exprExpandConstraint.isActive = true
+
+        // Preview hidden initially — shown when expression has content
+        previewLabel.isHidden = true
     }
 
     /// Creates a flow-layout container with function hint chip buttons.
@@ -320,6 +387,7 @@ final class ComputedColumnPanelController: NSWindowController, NSWindowDelegate 
 
         window?.makeFirstResponder(expressionTextView)
         updateAddButtonState()
+        schedulePreviewUpdate()
     }
 
     @objc private func cancelClicked() {
@@ -371,9 +439,90 @@ final class ComputedColumnPanelController: NSWindowController, NSWindowDelegate 
         errorLabel.isHidden = true
     }
 
+    // MARK: - Preview (US-018)
+
+    /// Schedules a debounced preview update 300ms after the last edit.
+    private func schedulePreviewUpdate() {
+        previewDebounceWorkItem?.cancel()
+
+        let expression = expressionTextView.string.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !expression.isEmpty else {
+            previewLabel.isHidden = true
+            previewContainer.isHidden = true
+            previewColumnNames = []
+            previewRows = []
+            return
+        }
+
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.executePreviewQuery()
+        }
+        previewDebounceWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: workItem)
+    }
+
+    /// Runs the preview query and updates the preview table or shows an error.
+    private func executePreviewQuery() {
+        guard let session = fileSession else { return }
+        let expression = expressionTextView.string.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !expression.isEmpty else { return }
+
+        let columnName = columnNameField.stringValue.trimmingCharacters(in: .whitespaces)
+
+        session.fetchComputedColumnPreview(expression: expression, columnName: columnName) { [weak self] result in
+            guard let self = self else { return }
+            switch result {
+            case .success(let preview):
+                self.hideError()
+                self.updatePreviewTable(columnNames: preview.columnNames, rows: preview.rows)
+            case .failure(let error):
+                self.showError(error.localizedDescription)
+                self.previewLabel.isHidden = true
+                self.previewContainer.isHidden = true
+            }
+        }
+    }
+
+    /// Configures the preview table columns and reloads data.
+    private func updatePreviewTable(columnNames: [String], rows: [[String]]) {
+        previewColumnNames = columnNames
+        previewRows = rows
+
+        // Remove old columns
+        for col in previewTableView.tableColumns.reversed() {
+            previewTableView.removeTableColumn(col)
+        }
+
+        // Add new columns
+        for (index, name) in previewColumnNames.enumerated() {
+            let col = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("preview_\(index)"))
+            col.title = name
+            col.minWidth = 60
+            // Highlight the computed column header
+            if index == previewColumnNames.count - 1 && !name.isEmpty {
+                let headerCell = NSTableHeaderCell()
+                let attrs: [NSAttributedString.Key: Any] = [
+                    .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+                    .foregroundColor: NSColor.controlAccentColor,
+                ]
+                headerCell.attributedStringValue = NSAttributedString(string: name, attributes: attrs)
+                col.headerCell = headerCell
+            } else {
+                col.headerCell.font = NSFont.systemFont(ofSize: 11)
+            }
+            previewTableView.addTableColumn(col)
+        }
+
+        previewTableView.reloadData()
+        previewTableView.sizeToFit()
+        previewLabel.isHidden = false
+        previewContainer.isHidden = false
+    }
+
     // MARK: - NSWindowDelegate
 
     func windowWillClose(_ notification: Notification) {
+        previewDebounceWorkItem?.cancel()
         if let frame = window?.frame {
             ComputedColumnPanelController.savedFrame = frame
         }
@@ -414,5 +563,45 @@ extension ComputedColumnPanelController: NSTextViewDelegate {
     func textDidChange(_ notification: Notification) {
         hideError()
         updateAddButtonState()
+        schedulePreviewUpdate()
+    }
+}
+
+// MARK: - NSTableViewDataSource & NSTableViewDelegate (Preview Table)
+
+extension ComputedColumnPanelController: NSTableViewDataSource, NSTableViewDelegate {
+    func numberOfRows(in tableView: NSTableView) -> Int {
+        return previewRows.count
+    }
+
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        guard let tableColumn = tableColumn else { return nil }
+        guard let colIndex = previewTableView.tableColumns.firstIndex(of: tableColumn) else { return nil }
+        guard row < previewRows.count, colIndex < previewRows[row].count else { return nil }
+
+        let cellID = NSUserInterfaceItemIdentifier("PreviewCell")
+        let cell: NSTextField
+        if let reused = tableView.makeView(withIdentifier: cellID, owner: nil) as? NSTextField {
+            cell = reused
+        } else {
+            cell = NSTextField(labelWithString: "")
+            cell.identifier = cellID
+            cell.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+            cell.lineBreakMode = .byTruncatingTail
+            cell.cell?.truncatesLastVisibleLine = true
+        }
+
+        cell.stringValue = previewRows[row][colIndex]
+
+        // Highlight computed column values with accent background
+        let isComputedCol = colIndex == previewColumnNames.count - 1
+        if isComputedCol {
+            cell.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.08)
+            cell.drawsBackground = true
+        } else {
+            cell.drawsBackground = false
+        }
+
+        return cell
     }
 }

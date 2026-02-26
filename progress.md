@@ -1256,3 +1256,32 @@
   - The AnalysisToolbarView already had `.computedColumn` as an enum case with the "function" SF Symbol — only the handler in AppDelegate needed implementation
   - For NSPanel floating utility windows, `becomesKeyOnlyIfNeeded = true` allows the main window to remain key when the panel doesn't need keyboard input, but the expression text view still receives focus when clicked
 ----
+
+## 2026-02-26 - US-018 - Live preview for computed column expression
+- Added `fetchComputedColumnPreview(expression:columnName:completion:)` to FileSession:
+  - Selects up to 3 existing columns for context plus `(expression) AS new_col FROM data LIMIT 5`
+  - Runs on the serial `queryQueue`, returns `ComputedColumnPreview` (columnNames + rows of strings) on main thread
+  - Errors (syntax errors, invalid expressions) propagated via Result type for inline display
+- Extended ComputedColumnPanelController with live preview section (US-018):
+  - PREVIEW label and NSTableView (5-row, non-scrollable) below the function hint chips
+  - Preview table has dynamic columns: context columns from the data + the computed column (highlighted with accent color header and tinted cell background)
+  - NSTableViewDataSource/Delegate conformance added for preview table data
+  - 300ms debounce using DispatchWorkItem pattern (cancel previous, schedule new) — same pattern as SearchBarView/profiler debounce
+  - On successful preview: hides error, configures table columns, reloads data
+  - On DuckDB error: shows error message in red below expression field, hides preview table
+  - Preview hidden when expression is empty; appears automatically on first valid input
+  - Debounce work item cancelled on window close to prevent stale callbacks
+- Panel default height increased from 420 to 560 to accommodate the preview section; min height increased from 340 to 420
+- Expression scroll view minimum height reduced from 80 to 60 to leave more room for preview
+- Added `schedulePreviewUpdate()` calls to both `textDidChange` (expression editing) and `chipClicked` (function template insertion)
+- Files changed: Sources/Model/FileSession.swift, Sources/UI/ComputedColumnPanelController.swift, plans/prd.json
+- Build succeeds, all 64 tests pass
+- **Learnings for future iterations:**
+  - `DuckDBValue` conforms to `CustomStringConvertible` — `.description` provides clean string representation for preview cells, avoiding a manual switch on all value types
+  - NSTableView with dynamic columns: remove all existing columns via `removeTableColumn` in a reversed loop, then add new ones. Column identifiers must be unique per rebuild
+  - The preview query uses `(expression) AS quotedName` — parentheses around the expression ensure operator precedence doesn't break the query
+  - DispatchWorkItem cancel pattern: the cancelled flag is checked lazily, so cancelling a pending work item prevents it from executing even if it's already in the dispatch queue
+  - NSTableHeaderCell's `attributedStringValue` can be set directly to highlight the computed column header in accent color — no need to subclass
+  - The preview section is positioned between the error label and the buttons, using Auto Layout constraints with `topAnchor.constraint(greaterThanOrEqualTo:)` on buttons to keep them pinned to the bottom
+  - `previewContainer.isHidden = true` initially keeps the preview area collapsed until the first valid expression is entered
+----

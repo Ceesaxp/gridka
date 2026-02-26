@@ -302,7 +302,7 @@
         "Compiles and runs without crashes"
       ],
       "priority": 18,
-      "passes": false,
+      "passes": true,
       "notes": "Use a small NSTableView (5 rows, non-scrollable) for the preview. Debounce using DispatchWorkItem — cancel previous work item on each keystroke, schedule new one after 300ms. Catch DuckDB errors and display them in a red NSTextField."
     },
     {

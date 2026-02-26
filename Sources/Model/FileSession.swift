@@ -1740,6 +1740,62 @@ final class FileSession {
         return DistributionData(bars: bars, trailingNote: trailingNote)
     }
 
+    // MARK: - Computed Column Preview (US-018)
+
+    /// Result of a computed column preview query.
+    struct ComputedColumnPreview {
+        /// Column names in the result (context columns + computed column).
+        let columnNames: [String]
+        /// Rows of string values (up to 5 rows).
+        let rows: [[String]]
+    }
+
+    /// Executes a preview query for a computed column expression.
+    /// Selects up to 3 existing columns for context plus the expression result, LIMIT 5.
+    /// Completion is called on the main thread with either the preview data or an error.
+    func fetchComputedColumnPreview(
+        expression: String,
+        columnName: String,
+        completion: @escaping (Result<ComputedColumnPreview, Error>) -> Void
+    ) {
+        // Pick up to 3 context columns (skip _gridka_rowid)
+        let contextCols = columns
+            .filter { $0.name != "_gridka_rowid" }
+            .prefix(3)
+            .map { QueryCoordinator.quote($0.name) }
+
+        let quotedName = QueryCoordinator.quote(columnName.isEmpty ? "computed" : columnName)
+        let selectParts = contextCols + ["(\(expression)) AS \(quotedName)"]
+        let sql = "SELECT \(selectParts.joined(separator: ", ")) FROM data LIMIT 5"
+
+        queryQueue.async { [weak self] in
+            guard self != nil else { return }
+            do {
+                let result = try self!.engine.execute(sql)
+                var colNames: [String] = []
+                for i in 0..<result.columnCount {
+                    colNames.append(result.columnName(at: i))
+                }
+                var rows: [[String]] = []
+                for r in 0..<result.rowCount {
+                    var row: [String] = []
+                    for c in 0..<result.columnCount {
+                        row.append(result.value(row: r, col: c).description)
+                    }
+                    rows.append(row)
+                }
+                let preview = ComputedColumnPreview(columnNames: colNames, rows: rows)
+                DispatchQueue.main.async {
+                    completion(.success(preview))
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    completion(.failure(error))
+                }
+            }
+        }
+    }
+
     // MARK: - View State Updates
 
     func updateViewState(_ newState: ViewState) {
