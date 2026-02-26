@@ -681,8 +681,11 @@ final class TableViewController: NSViewController {
         // Update header immediately
         profilerSidebar.showColumn(name: descriptor.name, typeName: duckDBTypeName(for: descriptor))
 
-        // Debounce the profiler query at 200ms to handle rapid column switching
+        // Invalidate any in-flight profiler query immediately so stale results
+        // from the previous column are discarded even if they arrive during
+        // the debounce window before the new query fires.
         profilerDebounceWorkItem?.cancel()
+        session.invalidateProfilerQueries()
         let columnName = selectedCol
         let workItem = DispatchWorkItem { [weak self] in
             guard let self = self, let session = self.fileSession else { return }
