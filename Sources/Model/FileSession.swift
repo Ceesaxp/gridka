@@ -1014,6 +1014,17 @@ final class FileSession {
                     return
                 }
 
+                // When all values in the column are NULL, DuckDB returns a single row
+                // with NULL aggregates. Detect this by checking MIN (col 0) — if it's
+                // NULL, there is no meaningful data to display.
+                if case .null = result.value(row: 0, col: 0) {
+                    DispatchQueue.main.async {
+                        guard self.profilerGeneration == generation else { return }
+                        completion(.failure(GridkaError.queryFailed("All values are NULL")))
+                    }
+                    return
+                }
+
                 func extractDouble(col: Int) -> Double {
                     switch result.value(row: 0, col: col) {
                     case .double(let v): return v
