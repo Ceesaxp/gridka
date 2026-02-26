@@ -220,7 +220,7 @@
         "Compiles and runs without crashes"
       ],
       "priority": 13,
-      "passes": false,
+      "passes": true,
       "notes": "Use the existing filter infrastructure — create a ColumnFilter with .equals operator and add it to ViewState.filters. Post a notification or use a delegate pattern so the main window controller can observe the filter change from the floating panel."
     },
     {

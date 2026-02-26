@@ -69,6 +69,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             }
         }
 
+        // US-013: Click-to-filter from frequency view
+        // Single-click a value → add filter (column = value), panel stays open
+        FrequencyPanelController.onValueClicked = { [weak self] columnName, value in
+            guard let self = self,
+                  let session = self.activeTab?.fileSession else { return }
+            var filters = session.viewState.filters
+            filters.removeAll { $0.column == columnName }
+            filters.append(ColumnFilter(column: columnName, operator: .equals, value: .string(value)))
+            self.handleFiltersChanged(filters)
+        }
+
+        // Double-click a value → add filter AND close the frequency panel
+        FrequencyPanelController.onValueDoubleClicked = { [weak self] columnName, value in
+            guard let self = self,
+                  let session = self.activeTab?.fileSession else { return }
+            var filters = session.viewState.filters
+            filters.removeAll { $0.column == columnName }
+            filters.append(ColumnFilter(column: columnName, operator: .equals, value: .string(value)))
+            self.handleFiltersChanged(filters)
+            FrequencyPanelController.closeIfOpen()
+        }
+
         if windowTabs.isEmpty {
             let win = createWindow()
             let tab = TabContext()

@@ -1120,3 +1120,22 @@
   - Chart document view height must be `max(contentHeight, clipViewHeight)` to prevent the chart from being smaller than the visible area when there are few rows
   - `autoresizingMask = [.width]` on the chart view makes it automatically resize when the split divider moves, without needing explicit frame updates or notification observers
 ----
+
+## 2026-02-26 - US-013 - Click-to-filter from frequency view
+- Wired `FrequencyPanelController.onValueClicked` static callback in `applicationDidFinishLaunching`:
+  - Single-click a frequency table row → replaces any existing filter for that column with `ColumnFilter(column:, operator: .equals, value: .string(value))`, then calls `handleFiltersChanged`
+  - Filter bar updates, status bar shows "showing X of Y rows", frequency panel stays open
+- Wired `FrequencyPanelController.onValueDoubleClicked` static callback:
+  - Double-click a frequency table row → adds the same filter AND calls `FrequencyPanelController.closeIfOpen()` to dismiss the panel
+- Both callbacks use the same replace-existing-filter pattern as the profiler's TopValues click-to-filter: `filters.removeAll { $0.column == columnName }` before appending
+- `handleFiltersChanged` (existing method) handles the entire downstream flow: ViewState update, cache invalidation, page re-fetch, filter bar update, status bar update
+- Binned mode rows are excluded from click-to-filter (guard `!isBinned` in `tableRowClicked`/`tableRowDoubleClicked` — already implemented in US-011)
+- Files changed: Sources/App/AppDelegate.swift, plans/prd.json
+- Build succeeds, all 64 tests pass
+- **Learnings for future iterations:**
+  - The `FrequencyPanelController.onValueClicked`/`onValueDoubleClicked` callbacks and the `tableRowClicked`/`tableRowDoubleClicked` action methods were already scaffolded in US-011 — US-013 only needed to wire the callbacks to the filter infrastructure in AppDelegate
+  - Static callbacks on FrequencyPanelController are wired once in `applicationDidFinishLaunching`, not per-TVC in `showTableView` — the panel is a singleton that operates across all tabs
+  - The `activeTab?.fileSession` lookup in the callback correctly gets the current tab's session at click time, not at callback registration time
+  - The replace-existing-filter pattern (`removeAll` + `append`) prevents duplicate filter chips when clicking multiple values in the same column
+  - `handleFiltersChanged` already handles the entire pipeline: ViewState → cache invalidation → page 0 fetch → filter bar → status bar — no additional wiring needed
+----
