@@ -633,11 +633,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             self.handleColumnDeleted(tab: tab, columnName: columnName)
         }
 
-        tvc.onValueFrequency = { [weak tvc] columnName in
-            guard let tvc = tvc else { return }
+        tvc.onValueFrequency = { columnName in
             NSLog("Value Frequency requested for column: \(columnName)")
             // Placeholder: will open FrequencyPanelController in US-010
-            _ = tvc
         }
 
         tvc.onColumnSelected = { [weak self, weak tvc] columnName in
