@@ -21,6 +21,17 @@ final class FileSession {
     /// IMPORTANT: Only read/write from the main thread to avoid data races with queryQueue.
     private var profilerGeneration: Int = 0
 
+    /// Generation counter for column summary computation. Incremented when summaries are
+    /// invalidated (data mutations, reload). Prevents stale summary results from being stored.
+    private var summaryGeneration: Int = 0
+
+    /// Cached column summaries keyed by column name. Computed once after full file load.
+    /// Invalidated when underlying data changes (cell edit, row delete, column add/delete, reload).
+    private(set) var columnSummaries: [String: ColumnSummary] = [:]
+
+    /// Callback invoked on the main thread when column summaries finish computing.
+    var onSummariesComputed: (() -> Void)?
+
     private(set) var tableName: String = "data"
     private(set) var columns: [ColumnDescriptor] = []
     private(set) var viewState: ViewState
@@ -431,6 +442,7 @@ final class FileSession {
                         totalFilteredRows: totalRows
                     )
                     self.rowCache.invalidateAll()
+                    self.invalidateColumnSummaries()
                     progress(1.0)
                     completion(.success(totalRows))
                 }
@@ -607,6 +619,7 @@ final class FileSession {
                     self.columns = cols
                     self.isModified = true
                     self.rowCache.invalidateAll()
+                    self.invalidateColumnSummaries()
                     completion(.success(cols))
                 }
             } catch {
@@ -638,6 +651,7 @@ final class FileSession {
                     self.columns = cols
                     self.isModified = true
                     self.rowCache.invalidateAll()
+                    self.invalidateColumnSummaries()
 
                     // Update ViewState: rename in sort columns
                     self.viewState.sortColumns = self.viewState.sortColumns.map { sc in
@@ -734,6 +748,7 @@ final class FileSession {
                     self.columns = cols
                     self.isModified = true
                     self.rowCache.invalidateAll()
+                    self.invalidateColumnSummaries()
                     completion(.success(cols))
                 }
             } catch {
@@ -764,6 +779,7 @@ final class FileSession {
                     self.columns = cols
                     self.isModified = true
                     self.rowCache.invalidateAll()
+                    self.invalidateColumnSummaries()
 
                     // Remove any sort columns referencing the deleted column
                     self.viewState.sortColumns.removeAll { $0.column == name }
@@ -813,6 +829,7 @@ final class FileSession {
                     self.totalRows += 1
                     self.viewState.totalFilteredRows += 1
                     self.isModified = true
+                    self.invalidateColumnSummaries()
                     // Invalidate last page of cache since the new row appears at the end
                     let lastPageIndex = self.rowCache.pageIndex(forRow: self.viewState.totalFilteredRows - 1)
                     self.rowCache.invalidatePage(lastPageIndex)
@@ -851,6 +868,7 @@ final class FileSession {
                     self.totalRows = newTotal
                     self.isModified = true
                     self.rowCache.invalidateAll()
+                    self.invalidateColumnSummaries()
 
                     // Remove edited cell indicators for deleted rows
                     let deletedSet = Set(rowids)
@@ -863,6 +881,206 @@ final class FileSession {
                     completion(.failure(error))
                 }
             }
+        }
+    }
+
+    // MARK: - Column Summary Computation (US-014)
+
+    /// Clears cached column summaries. Called when underlying data changes.
+    func invalidateColumnSummaries() {
+        summaryGeneration += 1
+        columnSummaries.removeAll()
+    }
+
+    /// Computes lightweight summary data for all columns after full file load.
+    /// Runs batched queries on the serial query queue and caches results.
+    /// Safe to call multiple times — stale results are discarded via generation counter.
+    func computeColumnSummaries() {
+        guard isFullyLoaded else { return }
+
+        summaryGeneration += 1
+        let generation = summaryGeneration
+        let currentColumns = columns.filter { $0.name != "_gridka_rowid" }
+        let currentTotalRows = totalRows
+
+        guard !currentColumns.isEmpty else { return }
+
+        // Phase 1: Batch cardinality/null query for all columns at once
+        let cardinalitySQL = profilerQueryBuilder.buildBatchCardinalityQuery(columns: currentColumns)
+
+        queryQueue.async { [weak self] in
+            guard let self = self else { return }
+
+            // Step 1: Fetch cardinality and null counts for all columns
+            var cardinalityMap: [String: (distinct: Int, nulls: Int)] = [:]
+            do {
+                let result = try self.engine.execute(cardinalitySQL)
+                for row in 0..<result.rowCount {
+                    let colName: String
+                    if case .string(let name) = result.value(row: row, col: 0) { colName = name }
+                    else { continue }
+
+                    let distinct: Int
+                    if case .integer(let v) = result.value(row: row, col: 1) { distinct = Int(v) }
+                    else { distinct = 0 }
+
+                    let nulls: Int
+                    if case .integer(let v) = result.value(row: row, col: 2) { nulls = Int(v) }
+                    else { nulls = 0 }
+
+                    cardinalityMap[colName] = (distinct: distinct, nulls: nulls)
+                }
+            } catch {
+                // If batch cardinality query fails, abort summary computation
+                return
+            }
+
+            // Check generation before proceeding to per-column distribution queries
+            var earlyAbort = false
+            DispatchQueue.main.sync {
+                if self.summaryGeneration != generation { earlyAbort = true }
+            }
+            if earlyAbort { return }
+
+            // Step 2: Per-column distribution queries
+            var summaries: [String: ColumnSummary] = [:]
+
+            for col in currentColumns {
+                // Check generation before each column query
+                var shouldAbort = false
+                DispatchQueue.main.sync {
+                    if self.summaryGeneration != generation { shouldAbort = true }
+                }
+                if shouldAbort { return }
+
+                let card = cardinalityMap[col.name] ?? (distinct: 0, nulls: 0)
+                let displayType = self.mapDisplayType(from: col.duckDBType)
+
+                let distribution: Distribution
+                switch displayType {
+                case .boolean:
+                    distribution = self.computeBooleanDistribution(columnName: col.name)
+
+                case .integer, .float:
+                    distribution = self.computeNumericDistribution(columnName: col.name, bucketCount: 10)
+
+                case .text, .date:
+                    if card.distinct <= 15 {
+                        distribution = self.computeCategoricalDistribution(columnName: col.name, limit: 15)
+                    } else {
+                        distribution = .highCardinality(uniqueCount: card.distinct)
+                    }
+
+                case .unknown:
+                    distribution = .highCardinality(uniqueCount: card.distinct)
+                }
+
+                summaries[col.name] = ColumnSummary(
+                    columnName: col.name,
+                    detectedType: displayType,
+                    cardinality: card.distinct,
+                    nullCount: card.nulls,
+                    totalRows: currentTotalRows,
+                    distribution: distribution
+                )
+            }
+
+            // Dispatch results to main thread, checking generation for staleness
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                guard self.summaryGeneration == generation else { return }
+                self.columnSummaries = summaries
+                self.onSummariesComputed?()
+            }
+        }
+    }
+
+    // MARK: - Summary Distribution Helpers (run on queryQueue)
+
+    private func computeBooleanDistribution(columnName: String) -> Distribution {
+        let sql = profilerQueryBuilder.buildSummaryBooleanDistributionQuery(columnName: columnName)
+        do {
+            let result = try engine.execute(sql)
+            guard result.rowCount > 0 else {
+                return .boolean(trueCount: 0, falseCount: 0)
+            }
+            let trueCount: Int
+            if case .integer(let v) = result.value(row: 0, col: 0) { trueCount = Int(v) }
+            else { trueCount = 0 }
+            let falseCount: Int
+            if case .integer(let v) = result.value(row: 0, col: 1) { falseCount = Int(v) }
+            else { falseCount = 0 }
+            return .boolean(trueCount: trueCount, falseCount: falseCount)
+        } catch {
+            return .boolean(trueCount: 0, falseCount: 0)
+        }
+    }
+
+    private func computeNumericDistribution(columnName: String, bucketCount: Int) -> Distribution {
+        let sql = profilerQueryBuilder.buildSummaryNumericHistogramQuery(columnName: columnName, bucketCount: bucketCount)
+        do {
+            let result = try engine.execute(sql)
+            guard result.rowCount > 0 else {
+                return .histogram(buckets: [])
+            }
+
+            // Extract min/max from first row
+            let colMin: Double
+            if case .double(let v) = result.value(row: 0, col: 2) { colMin = v }
+            else if case .integer(let v) = result.value(row: 0, col: 2) { colMin = Double(v) }
+            else { return .histogram(buckets: []) }
+
+            let colMax: Double
+            if case .double(let v) = result.value(row: 0, col: 3) { colMax = v }
+            else if case .integer(let v) = result.value(row: 0, col: 3) { colMax = Double(v) }
+            else { return .histogram(buckets: []) }
+
+            let step = (colMax - colMin) / Double(bucketCount)
+
+            var buckets: [(range: String, count: Int)] = []
+            for row in 0..<result.rowCount {
+                let bucket: Int
+                if case .integer(let v) = result.value(row: row, col: 0) { bucket = Int(v) }
+                else { continue }
+
+                let count: Int
+                if case .integer(let v) = result.value(row: row, col: 1) { count = Int(v) }
+                else { continue }
+
+                let low = colMin + Double(bucket - 1) * step
+                let high = colMin + Double(bucket) * step
+                let formatter = NumberFormatter()
+                formatter.numberStyle = .decimal
+                formatter.maximumFractionDigits = step == step.rounded() ? 0 : 1
+                let lowStr = formatter.string(from: NSNumber(value: low)) ?? "\(low)"
+                let highStr = formatter.string(from: NSNumber(value: high)) ?? "\(high)"
+                buckets.append((range: "\(lowStr)–\(highStr)", count: count))
+            }
+            return .histogram(buckets: buckets)
+        } catch {
+            return .histogram(buckets: [])
+        }
+    }
+
+    private func computeCategoricalDistribution(columnName: String, limit: Int) -> Distribution {
+        let sql = profilerQueryBuilder.buildSummaryCategoricalFrequencyQuery(columnName: columnName, limit: limit)
+        do {
+            let result = try engine.execute(sql)
+            var values: [(value: String, count: Int)] = []
+            for row in 0..<result.rowCount {
+                let value: String
+                if case .string(let v) = result.value(row: row, col: 0) { value = v }
+                else { value = "" }
+
+                let count: Int
+                if case .integer(let v) = result.value(row: row, col: 1) { count = Int(v) }
+                else { continue }
+
+                values.append((value: value, count: count))
+            }
+            return .frequency(values: values)
+        } catch {
+            return .frequency(values: [])
         }
     }
 
@@ -886,6 +1104,7 @@ final class FileSession {
                     self.rowCache.invalidatePage(pageIndex)
                     self.editedCells.insert(EditedCell(rowid: rowid, column: column))
                     self.isModified = true
+                    self.invalidateColumnSummaries()
                     completion(.success(()))
                 }
             } catch {

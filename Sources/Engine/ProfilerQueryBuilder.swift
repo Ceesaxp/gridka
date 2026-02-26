@@ -212,4 +212,72 @@ final class ProfilerQueryBuilder {
         FROM data\(whereSQL)
         """
     }
+
+    // MARK: - Batch Summary Queries (US-014)
+
+    /// Builds a single query to fetch cardinality (distinct count) and null count for ALL columns at once.
+    /// Returns one row per column with: col_name, distinct_count, null_count.
+    /// This batches what would otherwise be N individual queries into one.
+    func buildBatchCardinalityQuery(columns: [ColumnDescriptor]) -> String {
+        let cases = columns
+            .filter { $0.name != "_gridka_rowid" }
+            .map { col in
+                let q = QueryCoordinator.quote(col.name)
+                return "SELECT '\(col.name.replacingOccurrences(of: "'", with: "''"))' AS col_name, COUNT(DISTINCT \(q)) AS distinct_count, COUNT(*) - COUNT(\(q)) AS null_count FROM data"
+            }
+        return cases.joined(separator: " UNION ALL ")
+    }
+
+    /// Builds a histogram query for a numeric column summary (no filter — uses all data).
+    func buildSummaryNumericHistogramQuery(columnName: String, bucketCount: Int = 10) -> String {
+        let col = QueryCoordinator.quote(columnName)
+        return """
+        WITH bounds AS ( \
+        SELECT MIN(\(col)) AS col_min, MAX(\(col)) AS col_max \
+        FROM data WHERE \(col) IS NOT NULL \
+        ), \
+        bucketed AS ( \
+        SELECT \
+        CASE WHEN bounds.col_min = bounds.col_max THEN 1 \
+        ELSE LEAST(\(bucketCount), GREATEST(1, \
+        WIDTH_BUCKET(\(col)::DOUBLE, bounds.col_min::DOUBLE, bounds.col_max::DOUBLE + 1e-9, \(bucketCount)) \
+        )) END AS bucket, \
+        bounds.col_min, bounds.col_max \
+        FROM data, bounds \
+        WHERE \(col) IS NOT NULL \
+        ) \
+        SELECT \
+        bucket, \
+        COUNT(*) AS cnt, \
+        MIN(col_min) AS col_min, \
+        MIN(col_max) AS col_max \
+        FROM bucketed \
+        GROUP BY bucket \
+        ORDER BY bucket
+        """
+    }
+
+    /// Builds a frequency query for a categorical column summary (no filter — uses all data).
+    func buildSummaryCategoricalFrequencyQuery(columnName: String, limit: Int = 15) -> String {
+        let col = QueryCoordinator.quote(columnName)
+        return """
+        SELECT CAST(\(col) AS VARCHAR) AS val, COUNT(*) AS cnt \
+        FROM data \
+        WHERE \(col) IS NOT NULL \
+        GROUP BY \(col) \
+        ORDER BY cnt DESC \
+        LIMIT \(limit)
+        """
+    }
+
+    /// Builds a boolean distribution query for a column summary (no filter — uses all data).
+    func buildSummaryBooleanDistributionQuery(columnName: String) -> String {
+        let col = QueryCoordinator.quote(columnName)
+        return """
+        SELECT \
+        SUM(CASE WHEN \(col) = true THEN 1 ELSE 0 END) AS true_count, \
+        SUM(CASE WHEN \(col) = false THEN 1 ELSE 0 END) AS false_count \
+        FROM data
+        """
+    }
 }

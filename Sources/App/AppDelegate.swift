@@ -559,6 +559,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
                             // Rebalance memory across all tabs now that this tab has an active engine
                             self.rebalanceMemoryLimits()
+
+                            // Compute column summaries in background for sparklines (US-014)
+                            session.computeColumnSummaries()
                         case .failure(let error):
                             statusBar?.updateProgress(1.0)
                             self.showError(error, context: "loading full file")
@@ -847,6 +850,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 tvc.fileSession = session
                 tvc.configureColumns(session.columns)
                 tvc.autoFitAllColumns()
+                session.computeColumnSummaries()
             case .failure(let error):
                 tvc.statusBar.updateProgress(1.0)
                 self.showError(error, context: "reloading file")
@@ -907,6 +911,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 tvc.fileSession = session
                 tvc.configureColumns(session.columns)
                 tvc.autoFitAllColumns()
+                session.computeColumnSummaries()
             case .failure(let error):
                 tvc.statusBar.updateProgress(1.0)
                 self.showError(error, context: "reloading with delimiter")
@@ -961,6 +966,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 tvc.fileSession = session
                 tvc.configureColumns(session.columns)
                 tvc.autoFitAllColumns()
+                session.computeColumnSummaries()
             case .failure(let error):
                 tvc.statusBar.updateProgress(1.0)
                 self.showError(error, context: "reloading with encoding \(encodingName)")
