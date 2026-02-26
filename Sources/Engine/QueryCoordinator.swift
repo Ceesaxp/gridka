@@ -56,8 +56,11 @@ final class QueryCoordinator {
     /// Builds just the WHERE clause (without the "WHERE" keyword) from the current ViewState.
     /// Returns an empty string if no conditions apply. Used by ProfilerQueryBuilder to include
     /// the same filter/search conditions in profiler queries.
+    ///
+    /// **Note:** This excludes computed columns from the search condition because profiler
+    /// queries run against bare `FROM data` where computed column aliases don't exist.
     func buildWhereSQL(for state: ViewState, columns: [ColumnDescriptor]) -> String {
-        return buildWhereClause(for: state, columns: columns)
+        return buildWhereClause(for: state, columns: columns, includeComputedInSearch: false)
     }
 
     // MARK: - Private Builders
@@ -72,7 +75,7 @@ final class QueryCoordinator {
         return "(SELECT *, \(computedParts.joined(separator: ", ")) FROM data)"
     }
 
-    private func buildWhereClause(for state: ViewState, columns: [ColumnDescriptor]) -> String {
+    private func buildWhereClause(for state: ViewState, columns: [ColumnDescriptor], includeComputedInSearch: Bool = true) -> String {
         var conditions: [String] = []
 
         for filter in state.filters {
@@ -82,7 +85,8 @@ final class QueryCoordinator {
         }
 
         if let searchTerm = state.searchTerm, !searchTerm.isEmpty {
-            let searchCondition = buildSearchCondition(searchTerm, columns: columns, computedColumns: state.computedColumns)
+            let computedCols = includeComputedInSearch ? state.computedColumns : []
+            let searchCondition = buildSearchCondition(searchTerm, columns: columns, computedColumns: computedCols)
             if !searchCondition.isEmpty {
                 conditions.append("(\(searchCondition))")
             }

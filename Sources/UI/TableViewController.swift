@@ -1969,8 +1969,18 @@ extension TableViewController: NSMenuDelegate {
 
     @objc private func filterColumnClicked(_ sender: NSMenuItem) {
         guard let columnName = sender.representedObject as? String,
-              let session = fileSession,
-              let descriptor = session.columns.first(where: { $0.name == columnName }) else { return }
+              let session = fileSession else { return }
+
+        // Look up descriptor from base columns, or create a synthetic one for computed columns
+        let descriptor: ColumnDescriptor
+        if let baseDescriptor = session.columns.first(where: { $0.name == columnName }) {
+            descriptor = baseDescriptor
+        } else if computedColumnNames.contains(columnName) {
+            // Computed columns use text display type — provides the broadest filter operators
+            descriptor = ColumnDescriptor(name: columnName, duckDBType: .varchar, displayType: .text, index: -1)
+        } else {
+            return
+        }
 
         guard let headerView = tableView.headerView else { return }
         let columnIndex = tableView.column(withIdentifier: NSUserInterfaceItemIdentifier(columnName))

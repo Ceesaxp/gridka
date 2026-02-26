@@ -1149,12 +1149,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         // Re-fetch page 0 without the removed computed column
         session.fetchPage(index: 0) { _ in
             tvc.reloadVisibleRows()
-        }
 
-        tvc.statusBar.updateRowCount(
-            showing: session.viewState.totalFilteredRows,
-            total: session.totalRows
-        )
+            // Update row counts — requeryCount runs async, use small delay to let it complete
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                let filtered = session.viewState.totalFilteredRows
+                let total = session.totalRows
+                tvc.statusBar.updateRowCount(showing: filtered, total: total)
+            }
+        }
     }
 
     // MARK: - Rename Column (from Edit menu)
