@@ -10,6 +10,27 @@ final class FileSession {
 
     // MARK: - Properties
 
+    // ── Thread Ownership ────────────────────────────────────────────────
+    //
+    // FileSession uses two execution contexts:
+    //
+    //   • **Main thread** — owns ALL mutable state: viewState, rowCache,
+    //     columns, totalRows, isFullyLoaded, generation counters,
+    //     columnSummaries, editedCells, isModified, and configuration
+    //     properties (hasHeaders, customDelimiter, overrideEncoding, etc.).
+    //     Every public method that reads or writes these properties MUST be
+    //     called on the main thread.
+    //
+    //   • **queryQueue** (serial) — owns DuckDB engine access. All SQL
+    //     execution happens here. Closures dispatched to queryQueue must
+    //     NOT read or write main-thread state; they capture snapshots of
+    //     the values they need *before* the async dispatch and return
+    //     results back to main via DispatchQueue.main.async.
+    //
+    // Key public methods assert `dispatchPrecondition(condition: .onQueue(.main))`
+    // to catch violations at runtime during development.
+    // ─────────────────────────────────────────────────────────────────────
+
     private(set) var filePath: URL
     private let engine: DuckDBEngine
     private let queryCoordinator = QueryCoordinator()
@@ -19,20 +40,22 @@ final class FileSession {
     /// Monotonic generation token for page fetches. Incremented when viewState changes
     /// invalidate the row cache (sort/filter/search/computed columns). Fetch callbacks
     /// that carry a stale generation are discarded so rowCache never receives stale data.
-    /// IMPORTANT: Only read/write from the main thread.
+    /// Main-thread only.
     private var viewStateGeneration: Int = 0
 
     /// Generation counter for profiler queries. Incremented when column selection or
     /// filter/search state changes. Results with a stale generation are discarded.
-    /// IMPORTANT: Only read/write from the main thread to avoid data races with queryQueue.
+    /// Main-thread only.
     private var profilerGeneration: Int = 0
 
     /// Generation counter for column summary computation. Incremented when summaries are
     /// invalidated (data mutations, reload). Prevents stale summary results from being stored.
+    /// Main-thread only.
     private var summaryGeneration: Int = 0
 
     /// Cached column summaries keyed by column name. Computed once after full file load.
     /// Invalidated when underlying data changes (cell edit, row delete, column add/delete, reload).
+    /// Main-thread only.
     private(set) var columnSummaries: [String: ColumnSummary] = [:]
 
     /// Callback invoked on the main thread when column summaries finish computing.
@@ -244,6 +267,7 @@ final class FileSession {
     // MARK: - CSV Sniffing
 
     func sniffCSV(completion: @escaping () -> Void) {
+        dispatchPrecondition(condition: .onQueue(.main))
         let path = filePath.path.replacingOccurrences(of: "'", with: "''")
         let sql = "SELECT * FROM sniff_csv('\(path)')"
 
@@ -309,6 +333,7 @@ final class FileSession {
     // MARK: - Preview Loading
 
     func loadPreview(completion: @escaping (Result<[ColumnDescriptor], Error>) -> Void) {
+        dispatchPrecondition(condition: .onQueue(.main))
         let path = filePath.path.replacingOccurrences(of: "'", with: "''")
         let sql = "SELECT * FROM read_csv_auto('\(path)', \(csvReadParams())) LIMIT 1000"
 
@@ -336,6 +361,7 @@ final class FileSession {
     // MARK: - Full Loading
 
     func loadFull(progress: @escaping (Double) -> Void, completion: @escaping (Result<Int, Error>) -> Void) {
+        dispatchPrecondition(condition: .onQueue(.main))
         let path = filePath.path.replacingOccurrences(of: "'", with: "''")
         let createSQL = "CREATE TABLE data AS SELECT row_number() OVER () AS _gridka_rowid, * FROM read_csv_auto('\(path)', \(csvReadParams()))"
         let countSQL = "SELECT COUNT(*) FROM data"
@@ -391,6 +417,7 @@ final class FileSession {
     // MARK: - Page Fetching
 
     func fetchPage(index: Int, completion: @escaping (Result<RowCache.Page, Error>) -> Void) {
+        dispatchPrecondition(condition: .onQueue(.main))
         let range = rowCache.pageRange(forPageIndex: index)
         let sql = queryCoordinator.buildQuery(for: viewState, columns: columns, range: range)
         let generation = viewStateGeneration
@@ -429,11 +456,13 @@ final class FileSession {
     // MARK: - Reload with Header Toggle
 
     func reload(withHeaders: Bool, progress: @escaping (Double) -> Void, completion: @escaping (Result<Int, Error>) -> Void) {
+        dispatchPrecondition(condition: .onQueue(.main))
         hasHeaders = withHeaders
         reloadTable(progress: progress, completion: completion)
     }
 
     func reload(withDelimiter delimiter: String?, progress: @escaping (Double) -> Void, completion: @escaping (Result<Int, Error>) -> Void) {
+        dispatchPrecondition(condition: .onQueue(.main))
         customDelimiter = delimiter
         reloadTable(progress: progress, completion: completion)
     }
@@ -441,6 +470,7 @@ final class FileSession {
     /// Reload the file with a specific encoding.
     /// For UTF-8 and auto-detect, loads directly. For other encodings, transcodes to a UTF-8 temp file first.
     func reload(withEncoding encodingName: String, swiftEncoding: String.Encoding?, progress: @escaping (Double) -> Void, completion: @escaping (Result<Int, Error>) -> Void) {
+        dispatchPrecondition(condition: .onQueue(.main))
         overrideEncoding = encodingName
 
         if swiftEncoding == nil || swiftEncoding == .utf8 {
@@ -536,6 +566,7 @@ final class FileSession {
     }
 
     private func reloadTable(progress: @escaping (Double) -> Void, completion: @escaping (Result<Int, Error>) -> Void) {
+        dispatchPrecondition(condition: .onQueue(.main))
         let path = filePath.path.replacingOccurrences(of: "'", with: "''")
         let dropSQL = "DROP TABLE IF EXISTS data"
         let createSQL = "CREATE TABLE data AS SELECT row_number() OVER () AS _gridka_rowid, * FROM read_csv_auto('\(path)', \(csvReadParams()))"
@@ -592,6 +623,7 @@ final class FileSession {
     // MARK: - Save
 
     func save(completion: @escaping (Result<Void, Error>) -> Void) {
+        dispatchPrecondition(condition: .onQueue(.main))
         let path = filePath.path.replacingOccurrences(of: "'", with: "''")
 
         // Build explicit column list excluding _gridka_rowid
@@ -624,6 +656,7 @@ final class FileSession {
     /// If encoding is UTF-8, uses DuckDB COPY TO directly.
     /// For other encodings, queries all data, transcodes in Swift, writes with FileHandle.
     func saveAs(to url: URL, encoding: String.Encoding, delimiter: String, completion: @escaping (Result<Void, Error>) -> Void) {
+        dispatchPrecondition(condition: .onQueue(.main))
         // Build explicit column list excluding _gridka_rowid
         let exportColumns = columns
             .filter { $0.name != "_gridka_rowid" }
@@ -739,6 +772,7 @@ final class FileSession {
     /// The query includes computed column expressions: SELECT *, (expr1) AS name1, ... FROM data.
     /// The original file is never modified.
     func exportWithComputedColumns(to url: URL, completion: @escaping (Result<Void, Error>) -> Void) {
+        dispatchPrecondition(condition: .onQueue(.main))
         let source = queryCoordinator.buildSourceExpression(for: viewState)
 
         // Build explicit column list excluding _gridka_rowid
@@ -774,6 +808,7 @@ final class FileSession {
     /// `duckDBType` should be one of: VARCHAR, BIGINT, DOUBLE, DATE, BOOLEAN.
     /// On success, refreshes column descriptors from the updated table schema.
     func addColumn(name: String, duckDBType: String, completion: @escaping (Result<[ColumnDescriptor], Error>) -> Void) {
+        dispatchPrecondition(condition: .onQueue(.main))
         let quotedName = QueryCoordinator.quote(name)
         let alterSQL = "ALTER TABLE data ADD COLUMN \(quotedName) \(duckDBType)"
         let schemaSQL = "SELECT * FROM data LIMIT 0"
@@ -805,6 +840,7 @@ final class FileSession {
     /// Renames a column via ALTER TABLE RENAME COLUMN.
     /// On success, refreshes column descriptors and updates filters/sort referencing the old name.
     func renameColumn(oldName: String, newName: String, completion: @escaping (Result<[ColumnDescriptor], Error>) -> Void) {
+        dispatchPrecondition(condition: .onQueue(.main))
         let quotedOld = QueryCoordinator.quote(oldName)
         let quotedNew = QueryCoordinator.quote(newName)
         let renameSQL = "ALTER TABLE data RENAME COLUMN \(quotedOld) TO \(quotedNew)"
@@ -869,6 +905,7 @@ final class FileSession {
     /// If ALTER COLUMN is not supported, uses a workaround: add new column with CAST, drop old, rename.
     /// On success, refreshes column descriptors from the updated table schema.
     func changeColumnType(columnName: String, newDuckDBType: String, completion: @escaping (Result<[ColumnDescriptor], Error>) -> Void) {
+        dispatchPrecondition(condition: .onQueue(.main))
         let quotedColumn = QueryCoordinator.quote(columnName)
         let alterSQL = "ALTER TABLE data ALTER COLUMN \(quotedColumn) SET DATA TYPE \(newDuckDBType)"
         let schemaSQL = "SELECT * FROM data LIMIT 0"
@@ -934,6 +971,7 @@ final class FileSession {
     /// Deletes a column via ALTER TABLE DROP COLUMN.
     /// On success, refreshes column descriptors and removes references from ViewState.
     func deleteColumn(name: String, completion: @escaping (Result<[ColumnDescriptor], Error>) -> Void) {
+        dispatchPrecondition(condition: .onQueue(.main))
         let quotedName = QueryCoordinator.quote(name)
         let dropSQL = "ALTER TABLE data DROP COLUMN \(quotedName)"
         let schemaSQL = "SELECT * FROM data LIMIT 0"
@@ -980,6 +1018,7 @@ final class FileSession {
     /// Inserts a new row with all NULL values except _gridka_rowid.
     /// Returns the new row's _gridka_rowid on success.
     func addRow(completion: @escaping (Result<Int64, Error>) -> Void) {
+        dispatchPrecondition(condition: .onQueue(.main))
         let insertSQL = "INSERT INTO data (_gridka_rowid) VALUES ((SELECT COALESCE(MAX(_gridka_rowid), 0) + 1 FROM data))"
         let rowidSQL = "SELECT MAX(_gridka_rowid) FROM data"
 
@@ -1018,6 +1057,7 @@ final class FileSession {
     /// Deletes one or more rows by their _gridka_rowid values.
     /// On success, invalidates the row cache and decrements row counts.
     func deleteRows(rowids: [Int64], completion: @escaping (Result<Void, Error>) -> Void) {
+        dispatchPrecondition(condition: .onQueue(.main))
         let idList = rowids.map { String($0) }.joined(separator: ", ")
         let deleteSQL = "DELETE FROM data WHERE _gridka_rowid IN (\(idList))"
         let countSQL = "SELECT COUNT(*) FROM data"
@@ -1057,7 +1097,9 @@ final class FileSession {
     // MARK: - Column Summary Computation (US-014)
 
     /// Clears cached column summaries. Called when underlying data changes.
+    /// Must be called on the main thread.
     func invalidateColumnSummaries() {
+        dispatchPrecondition(condition: .onQueue(.main))
         summaryGeneration += 1
         columnSummaries.removeAll()
     }
@@ -1066,6 +1108,7 @@ final class FileSession {
     /// Runs batched queries on the serial query queue and caches results.
     /// Safe to call multiple times — stale results are discarded via generation counter.
     func computeColumnSummaries() {
+        dispatchPrecondition(condition: .onQueue(.main))
         guard isFullyLoaded else { return }
 
         // Clear stale cache immediately so the UI never shows old summaries
@@ -1262,16 +1305,17 @@ final class FileSession {
     /// The value string is written as-is (empty string for clearing a cell).
     /// `displayRow` is the row index in the current view (respecting sort/filter) used for cache invalidation.
     func updateCell(rowid: Int64, column: String, value: String, displayRow: Int, completion: @escaping (Result<Void, Error>) -> Void) {
+        dispatchPrecondition(condition: .onQueue(.main))
         let quotedColumn = QueryCoordinator.quote(column)
         let escapedValue = value.replacingOccurrences(of: "'", with: "''")
         let sql = "UPDATE data SET \(quotedColumn) = '\(escapedValue)' WHERE _gridka_rowid = \(rowid)"
+        // Compute page index on main thread — rowCache is main-thread-only.
+        let pageIndex = rowCache.pageIndex(forRow: displayRow)
 
         queryQueue.async { [weak self] in
             guard let self = self else { return }
             do {
                 try self.engine.execute(sql)
-                // Invalidate the cache page containing this display row
-                let pageIndex = self.rowCache.pageIndex(forRow: displayRow)
                 DispatchQueue.main.async {
                     self.rowCache.invalidatePage(pageIndex)
                     self.editedCells.insert(EditedCell(rowid: rowid, column: column))
@@ -1304,15 +1348,18 @@ final class FileSession {
     }
 
     /// Increments the profiler generation counter, invalidating any in-flight profiler queries.
+    /// Must be called on the main thread.
     func invalidateProfilerQueries() {
+        dispatchPrecondition(condition: .onQueue(.main))
         profilerGeneration += 1
     }
 
     /// Fetches overview stats (rows, unique, nulls, empty) for the given column.
     /// The completion handler is called on the main thread.
     /// If a new column is selected or filters change before results arrive, stale results are discarded.
-    /// Must be called from the main thread (generation counter is main-thread-only).
+    /// Must be called on the main thread.
     func fetchOverviewStats(columnName: String, completion: @escaping (Result<OverviewStats, Error>) -> Void) {
+        dispatchPrecondition(condition: .onQueue(.main))
         profilerGeneration += 1
         let generation = profilerGeneration
 
@@ -1385,8 +1432,9 @@ final class FileSession {
     /// Fetches descriptive statistics (min, max, mean, median, stddev, q1, q3) for a numeric column.
     /// The completion handler is called on the main thread.
     /// If a new column is selected or filters change before results arrive, stale results are discarded.
-    /// Must be called from the main thread (generation counter is main-thread-only).
+    /// Must be called on the main thread.
     func fetchDescriptiveStats(columnName: String, completion: @escaping (Result<DescriptiveStats, Error>) -> Void) {
+        dispatchPrecondition(condition: .onQueue(.main))
         let generation = profilerGeneration
 
         let sql = profilerQueryBuilder.buildDescriptiveStatsQuery(
@@ -1475,12 +1523,14 @@ final class FileSession {
     /// Fetches distribution data for the given column.
     /// Chooses numeric histogram, boolean counts, or categorical frequency based on column type.
     /// The completion handler is called on the main thread.
+    /// Must be called on the main thread.
     func fetchDistribution(
         columnName: String,
         columnType: DuckDBColumnType,
         uniqueCount: Int,
         completion: @escaping (Result<DistributionData, Error>) -> Void
     ) {
+        dispatchPrecondition(condition: .onQueue(.main))
         let generation = profilerGeneration
 
         let sql: String
@@ -1543,6 +1593,7 @@ final class FileSession {
 
     /// Fetches the top 10 most frequent values for a column.
     /// The completion handler is called on the main thread.
+    /// Must be called on the main thread.
     func fetchTopValues(
         columnName: String,
         totalRows: Int,
@@ -1550,6 +1601,7 @@ final class FileSession {
         uniqueCount: Int,
         completion: @escaping (Result<TopValuesData, Error>) -> Void
     ) {
+        dispatchPrecondition(condition: .onQueue(.main))
         let generation = profilerGeneration
 
         // If all non-null values are unique, skip the query.
@@ -1634,10 +1686,12 @@ final class FileSession {
 
     /// Fetches the complete value frequency distribution for the frequency panel (no LIMIT).
     /// The completion handler is called on the main thread.
+    /// Must be called on the main thread.
     func fetchFullFrequency(
         columnName: String,
         completion: @escaping (Result<FrequencyData, Error>) -> Void
     ) {
+        dispatchPrecondition(condition: .onQueue(.main))
         let sql = profilerQueryBuilder.buildFullFrequencyQuery(
             columnName: columnName,
             viewState: viewState,
@@ -1692,10 +1746,12 @@ final class FileSession {
     }
 
     /// Fetches binned frequency data for numeric columns.
+    /// Must be called on the main thread.
     func fetchBinnedFrequency(
         columnName: String,
         completion: @escaping (Result<FrequencyData, Error>) -> Void
     ) {
+        dispatchPrecondition(condition: .onQueue(.main))
         let sql = profilerQueryBuilder.buildBinnedFrequencyQuery(
             columnName: columnName,
             viewState: viewState,
@@ -1956,6 +2012,7 @@ final class FileSession {
         columnName: String,
         completion: @escaping (Result<ComputedColumnPreview, Error>) -> Void
     ) {
+        dispatchPrecondition(condition: .onQueue(.main))
         // Reject semicolons outside string literals to prevent multi-statement injection
         // (e.g. "1); COMMIT; DELETE FROM data; --") that could escape the read-only
         // transaction below. Semicolons inside single-quoted literals are safe
@@ -2037,6 +2094,7 @@ final class FileSession {
         aggregations: [AggregationEntry],
         completion: @escaping (Result<GroupByPreview, Error>) -> Void
     ) {
+        dispatchPrecondition(condition: .onQueue(.main))
         guard !aggregations.isEmpty else {
             DispatchQueue.main.async {
                 completion(.failure(GridkaError.queryFailed("No aggregations specified")))
@@ -2124,6 +2182,7 @@ final class FileSession {
     // MARK: - View State Updates
 
     func updateViewState(_ newState: ViewState) {
+        dispatchPrecondition(condition: .onQueue(.main))
         let countChanged = newState.filters != viewState.filters
             || newState.searchTerm != viewState.searchTerm
         let computedColumnsChanged = newState.computedColumns != viewState.computedColumns
@@ -2148,7 +2207,9 @@ final class FileSession {
     }
 
     /// Re-queries the filtered row count. Used after row deletion to update totalFilteredRows.
+    /// Must be called on the main thread.
     func requeryFilteredCount() {
+        dispatchPrecondition(condition: .onQueue(.main))
         requeryCount()
     }
 
@@ -2158,11 +2219,13 @@ final class FileSession {
     /// any in-flight page fetches dispatched before this point are discarded on arrival.
     /// Must be called on the main thread.
     private func invalidateRowCache() {
+        dispatchPrecondition(condition: .onQueue(.main))
         viewStateGeneration += 1
         rowCache.invalidateAll()
     }
 
     private func requeryCount() {
+        dispatchPrecondition(condition: .onQueue(.main))
         let sql = queryCoordinator.buildCountQuery(for: viewState, columns: columns)
 
         queryQueue.async { [weak self] in
