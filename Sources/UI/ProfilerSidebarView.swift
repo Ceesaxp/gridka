@@ -109,6 +109,12 @@ final class ProfilerSidebarView: NSView {
     /// Container for the overview section (visible only when stats are loaded).
     private var overviewSection: NSView?
 
+    /// Container for the distribution section.
+    private var distributionSection: NSView?
+
+    /// Histogram bar chart for value distribution.
+    private let histogramView = HistogramView()
+
     /// Loading indicator shown while profiler queries are in flight.
     private let loadingLabel: NSTextField = {
         let label = NSTextField(labelWithString: "Loading…")
@@ -167,6 +173,11 @@ final class ProfilerSidebarView: NSView {
         overviewSection = section
         stackView.addArrangedSubview(section)
 
+        // Build distribution section
+        let distSection = buildDistributionSection()
+        distributionSection = distSection
+        stackView.addArrangedSubview(distSection)
+
         showPlaceholder()
     }
 
@@ -199,8 +210,9 @@ final class ProfilerSidebarView: NSView {
         typeBadge.textColor = .white
         typeBadge.layer?.backgroundColor = badgeColor(for: typeName).cgColor
 
-        // Reset overview stats while loading
+        // Reset overview stats and distribution while loading
         overviewSection?.isHidden = true
+        distributionSection?.isHidden = true
         loadingLabel.isHidden = false
     }
 
@@ -214,6 +226,7 @@ final class ProfilerSidebarView: NSView {
     func showLoading() {
         loadingLabel.isHidden = false
         overviewSection?.isHidden = true
+        distributionSection?.isHidden = true
     }
 
     /// Updates the overview stats section with fetched data.
@@ -260,6 +273,43 @@ final class ProfilerSidebarView: NSView {
             equalTo: completenessTrack.widthAnchor, multiplier: max(CGFloat(completeness), 0.001)
         )
         completenessFillWidth?.isActive = true
+    }
+
+    /// Updates the distribution histogram with fetched data.
+    func updateDistribution(bars: [HistogramView.Bar], minLabel: String?, maxLabel: String?, trailingNote: String?) {
+        distributionSection?.isHidden = false
+        histogramView.bars = bars
+        histogramView.minLabel = minLabel
+        histogramView.maxLabel = maxLabel
+        histogramView.trailingNote = trailingNote
+    }
+
+    // MARK: - Distribution Section Builder
+
+    private func buildDistributionSection() -> NSView {
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+
+        let sectionTitle = NSTextField(labelWithString: "DISTRIBUTION")
+        sectionTitle.font = NSFont.systemFont(ofSize: 10, weight: .semibold)
+        sectionTitle.textColor = .tertiaryLabelColor
+        sectionTitle.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(sectionTitle)
+        container.addSubview(histogramView)
+
+        NSLayoutConstraint.activate([
+            sectionTitle.topAnchor.constraint(equalTo: container.topAnchor),
+            sectionTitle.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            sectionTitle.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor),
+
+            histogramView.topAnchor.constraint(equalTo: sectionTitle.bottomAnchor, constant: 8),
+            histogramView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            histogramView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            histogramView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
+
+        container.isHidden = true
+        return container
     }
 
     // MARK: - Overview Section Builder

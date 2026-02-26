@@ -974,6 +974,206 @@ final class FileSession {
         }
     }
 
+    /// Distribution data for the profiler histogram.
+    struct DistributionData {
+        struct Bar {
+            let label: String
+            let count: Int
+            var detail: String?
+        }
+        let bars: [Bar]
+        var minLabel: String?
+        var maxLabel: String?
+        var trailingNote: String?
+    }
+
+    /// Fetches distribution data for the given column.
+    /// Chooses numeric histogram, boolean counts, or categorical frequency based on column type.
+    /// The completion handler is called on the main thread.
+    func fetchDistribution(
+        columnName: String,
+        columnType: DuckDBColumnType,
+        uniqueCount: Int,
+        completion: @escaping (Result<DistributionData, Error>) -> Void
+    ) {
+        let generation = profilerGeneration
+
+        let sql: String
+        let parseMode: DistributionParseMode
+
+        switch columnType {
+        case .boolean:
+            sql = profilerQueryBuilder.buildBooleanDistributionQuery(
+                columnName: columnName, viewState: viewState, columns: columns
+            )
+            parseMode = .boolean
+
+        case .integer, .bigint, .float, .double:
+            sql = profilerQueryBuilder.buildNumericHistogramQuery(
+                columnName: columnName, viewState: viewState, columns: columns
+            )
+            parseMode = .numeric
+
+        default:
+            // Categorical: VARCHAR, DATE, TIMESTAMP, etc.
+            let limit = uniqueCount <= 50 ? uniqueCount : 10
+            sql = profilerQueryBuilder.buildCategoricalFrequencyQuery(
+                columnName: columnName, viewState: viewState, columns: columns, limit: limit
+            )
+            parseMode = .categorical(uniqueCount: uniqueCount)
+        }
+
+        queryQueue.async { [weak self] in
+            guard let self = self else { return }
+            do {
+                let result = try self.engine.execute(sql)
+                let data = self.parseDistribution(result: result, mode: parseMode)
+                DispatchQueue.main.async {
+                    guard self.profilerGeneration == generation else { return }
+                    completion(.success(data))
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    guard self.profilerGeneration == generation else { return }
+                    completion(.failure(error))
+                }
+            }
+        }
+    }
+
+    private enum DistributionParseMode {
+        case numeric
+        case boolean
+        case categorical(uniqueCount: Int)
+    }
+
+    private func parseDistribution(result: DuckDBResult, mode: DistributionParseMode) -> DistributionData {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = 2
+
+        switch mode {
+        case .numeric:
+            return parseNumericDistribution(result: result, formatter: formatter)
+        case .boolean:
+            return parseBooleanDistribution(result: result)
+        case .categorical(let uniqueCount):
+            return parseCategoricalDistribution(result: result, uniqueCount: uniqueCount, formatter: formatter)
+        }
+    }
+
+    private func parseNumericDistribution(result: DuckDBResult, formatter: NumberFormatter) -> DistributionData {
+        var bars: [DistributionData.Bar] = []
+        var globalMin: Double?
+        var globalMax: Double?
+        let bucketCount = 10
+
+        for row in 0..<result.rowCount {
+            let bucket: Int
+            if case .integer(let v) = result.value(row: row, col: 0) { bucket = Int(v) }
+            else { continue }
+
+            let count: Int
+            if case .integer(let v) = result.value(row: row, col: 1) { count = Int(v) }
+            else { continue }
+
+            // col_min and col_max from the CTE
+            if globalMin == nil {
+                switch result.value(row: row, col: 2) {
+                case .integer(let v): globalMin = Double(v)
+                case .double(let v): globalMin = v
+                default: break
+                }
+            }
+            if globalMax == nil {
+                switch result.value(row: row, col: 3) {
+                case .integer(let v): globalMax = Double(v)
+                case .double(let v): globalMax = v
+                default: break
+                }
+            }
+
+            bars.append(DistributionData.Bar(label: "#\(bucket)", count: count))
+        }
+
+        // Compute bucket labels from min/max
+        if let mn = globalMin, let mx = globalMax, bars.count > 0 {
+            let range = mx - mn
+            let step = range / Double(bucketCount)
+            for i in 0..<bars.count {
+                let bucket: Int
+                if let parsed = Int(bars[i].label.dropFirst()) { bucket = parsed }
+                else { continue }
+                let lo = mn + Double(bucket - 1) * step
+                let hi = mn + Double(bucket) * step
+                let loStr = formatter.string(from: NSNumber(value: lo)) ?? "\(lo)"
+                let hiStr = formatter.string(from: NSNumber(value: hi)) ?? "\(hi)"
+                bars[i] = DistributionData.Bar(
+                    label: loStr,
+                    count: bars[i].count,
+                    detail: "\(loStr) – \(hiStr)"
+                )
+            }
+        }
+
+        let minStr = globalMin.flatMap { formatter.string(from: NSNumber(value: $0)) }
+        let maxStr = globalMax.flatMap { formatter.string(from: NSNumber(value: $0)) }
+        return DistributionData(bars: bars, minLabel: minStr, maxLabel: maxStr)
+    }
+
+    private func parseBooleanDistribution(result: DuckDBResult) -> DistributionData {
+        guard result.rowCount > 0 else {
+            return DistributionData(bars: [])
+        }
+        let trueCount: Int
+        if case .integer(let v) = result.value(row: 0, col: 0) { trueCount = Int(v) }
+        else { trueCount = 0 }
+
+        let falseCount: Int
+        if case .integer(let v) = result.value(row: 0, col: 1) { falseCount = Int(v) }
+        else { falseCount = 0 }
+
+        let total = trueCount + falseCount
+        let truePct = total > 0 ? Int(round(Double(trueCount) / Double(total) * 100)) : 0
+        let falsePct = total > 0 ? 100 - truePct : 0
+
+        return DistributionData(bars: [
+            DistributionData.Bar(label: "true (\(truePct)%)", count: trueCount),
+            DistributionData.Bar(label: "false (\(falsePct)%)", count: falseCount),
+        ])
+    }
+
+    private func parseCategoricalDistribution(result: DuckDBResult, uniqueCount: Int, formatter: NumberFormatter) -> DistributionData {
+        var bars: [DistributionData.Bar] = []
+        for row in 0..<result.rowCount {
+            let label: String
+            switch result.value(row: row, col: 0) {
+            case .string(let v): label = v
+            case .integer(let v): label = String(v)
+            case .double(let v): label = formatter.string(from: NSNumber(value: v)) ?? String(v)
+            case .boolean(let v): label = v ? "true" : "false"
+            case .date(let v): label = v
+            case .null: label = "(null)"
+            }
+
+            let count: Int
+            if case .integer(let v) = result.value(row: row, col: 1) { count = Int(v) }
+            else { continue }
+
+            bars.append(DistributionData.Bar(label: label, count: count))
+        }
+
+        let trailingNote: String?
+        if uniqueCount > 50 {
+            let remaining = uniqueCount - bars.count
+            trailingNote = remaining > 0 ? "and \(remaining) more…" : nil
+        } else {
+            trailingNote = nil
+        }
+
+        return DistributionData(bars: bars, trailingNote: trailingNote)
+    }
+
     // MARK: - View State Updates
 
     func updateViewState(_ newState: ViewState) {

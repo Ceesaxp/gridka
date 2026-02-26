@@ -687,6 +687,7 @@ final class TableViewController: NSViewController {
         profilerDebounceWorkItem?.cancel()
         session.invalidateProfilerQueries()
         let columnName = selectedCol
+        let columnType = descriptor.duckDBType
         let workItem = DispatchWorkItem { [weak self] in
             guard let self = self, let session = self.fileSession else { return }
             session.fetchOverviewStats(columnName: columnName) { [weak self] result in
@@ -699,6 +700,25 @@ final class TableViewController: NSViewController {
                         nullCount: stats.nullCount,
                         emptyCount: stats.emptyCount
                     )
+                    // Chain: fetch distribution after overview (needs uniqueCount)
+                    session.fetchDistribution(
+                        columnName: columnName,
+                        columnType: columnType,
+                        uniqueCount: stats.uniqueCount
+                    ) { [weak self] distResult in
+                        guard let self = self else { return }
+                        if case .success(let data) = distResult {
+                            let bars = data.bars.map {
+                                HistogramView.Bar(label: $0.label, count: $0.count, detail: $0.detail)
+                            }
+                            self.profilerSidebar.updateDistribution(
+                                bars: bars,
+                                minLabel: data.minLabel,
+                                maxLabel: data.maxLabel,
+                                trailingNote: data.trailingNote
+                            )
+                        }
+                    }
                 case .failure:
                     // Query failed — keep loading state (may have been cancelled)
                     break

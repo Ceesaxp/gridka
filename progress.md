@@ -888,3 +888,35 @@
   - The `showColumn()` method resets the overview section to hidden and shows "Loading…" — this ensures the user sees fresh data, not stale stats from the previous column
   - `NumberFormatter` with `.decimal` number style automatically adds grouping separators (e.g., "12,400") — cleaner than manual string formatting
 ----
+
+## 2026-02-26 - US-005 - Show distribution histogram in profiler
+- Created `Sources/UI/HistogramView.swift` — custom NSView subclass that draws horizontal bar charts with Core Graphics
+  - Bars with label (left), proportional colored bar (center), count (right)
+  - Supports optional min/max labels below chart for numeric columns
+  - Supports trailing note ("and N more…") for high-cardinality categorical columns
+  - Tooltip tracking areas on each bar showing value/range and count on hover
+  - Uses `isFlipped = true` for top-to-bottom drawing
+  - Intrinsic content size based on bar count for Auto Layout integration
+- Extended `Sources/Engine/ProfilerQueryBuilder.swift` with 3 new query builders:
+  - `buildNumericHistogramQuery()` — WIDTH_BUCKET CTE for equal-width bins (10 buckets)
+  - `buildCategoricalFrequencyQuery()` — GROUP BY with ORDER BY cnt DESC LIMIT
+  - `buildBooleanDistributionQuery()` — SUM(CASE WHEN) for true/false counts
+- Extended `Sources/Model/FileSession.swift`:
+  - Added `DistributionData` struct with nested `Bar` type, optional minLabel/maxLabel/trailingNote
+  - Added `fetchDistribution(columnName:columnType:uniqueCount:completion:)` — dispatches correct query based on column type
+  - Parsing functions for each mode: numeric (bucket labels computed from min/max/step), boolean (percentage labels), categorical (with "and N more…" note for >50 unique)
+  - Uses same generation counter pattern as overview stats for stale result discard
+- Extended `Sources/UI/ProfilerSidebarView.swift`:
+  - Added DISTRIBUTION section below OVERVIEW with HistogramView
+  - `updateDistribution(bars:minLabel:maxLabel:trailingNote:)` public API
+  - Distribution section hidden during loading, shown after data arrives
+- Modified `Sources/UI/TableViewController.swift`:
+  - Chained `fetchDistribution()` call after successful `fetchOverviewStats()` — uses uniqueCount from overview to determine categorical strategy
+  - Maps `FileSession.DistributionData.Bar` to `HistogramView.Bar` for sidebar update
+- Build succeeds, all 64 tests pass
+- **Learnings:**
+  - DuckDB WIDTH_BUCKET(value, min, max, count) returns 0 for values < min and count+1 for values >= max — need LEAST/GREATEST clamping
+  - For numeric histograms, bucket labels are computed in Swift from min/max/step rather than in SQL to keep the query simpler
+  - Chaining distribution fetch after overview stats is clean because distribution needs uniqueCount to decide between full frequency vs top-10 for categorical columns
+  - HistogramView tooltip implementation uses NSTrackingArea with userInfo dictionary — areas are rebuilt on each draw() to match current bar positions
+----

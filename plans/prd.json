@@ -88,7 +88,7 @@
         "Compiles and runs without crashes"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "Create a custom HistogramView (NSView subclass) that draws bars with Core Graphics. The data comes from ProfilerQueryBuilder queries: WIDTH_BUCKET for numeric, GROUP BY ORDER BY cnt DESC for categorical. Accept an array of (label, count) tuples for rendering."
     },
     {
