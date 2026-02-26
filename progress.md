@@ -1285,3 +1285,37 @@
   - The preview section is positioned between the error label and the buttons, using Auto Layout constraints with `topAnchor.constraint(greaterThanOrEqualTo:)` on buttons to keep them pinned to the bottom
   - `previewContainer.isHidden = true` initially keeps the preview area collapsed until the first valid expression is entered
 ----
+
+## 2026-02-26 - US-019 - Add computed column to table and QueryCoordinator
+- Created `ComputedColumn` struct (name + expression) in ViewState.swift, added `computedColumns: [ComputedColumn]` to ViewState with equality check
+- Updated `QueryCoordinator.buildQuery()` and `buildCountQuery()` to wrap data source in a subquery when computed columns exist:
+  - `SELECT * FROM (SELECT *, (expr1) AS "name1", (expr2) AS "name2" FROM data) WHERE ... ORDER BY ... LIMIT ... OFFSET ...`
+  - New private `buildSourceExpression(for:)` method returns plain `data` or the subquery
+- Updated `buildSearchCondition` to include computed columns in global search (ORs across base + computed columns)
+- Updated `FileSession.updateViewState()` to invalidate row cache when computed columns change
+- Updated `ComputedColumnPanelController` init to include existing computed column names in duplicate validation
+- Wired `ComputedColumnPanelController.onAddColumn` callback in AppDelegate:
+  - `handleComputedColumnAdded(name:expression:)` adds ComputedColumn to ViewState, adds table column, re-fetches page 0
+- Added computed column display in TableViewController:
+  - `addComputedColumn(name:)` / `removeComputedColumn(name:)` methods manage NSTableColumns
+  - `makeComputedTableColumn(name:)` creates columns with formula indicator (ƒ prefix in purple, italic name)
+  - `styleComputedHeaderCell()` for sort/selection state updates on computed column headers
+  - `computedColumnNames: Set<String>` tracks which columns are computed
+  - `configureColumns()` re-adds computed columns after base column reconfiguration
+- Added 'Remove Computed Column' context menu item for computed columns:
+  - Computed columns get a simplified context menu (Filter + Remove Computed Column only)
+  - `onComputedColumnRemoved` callback wired to `handleComputedColumnRemoved(tab:columnName:)` in AppDelegate
+  - Removal also cleans up any sorts/filters referencing the removed computed column
+- Computed columns are not editable (inline editing guard added)
+- Added 6 new QueryCoordinator tests: single/multiple computed columns, count query, filter+sort on computed, empty computed columns, search with computed
+- Files changed: Sources/Model/ViewState.swift, Sources/Engine/QueryCoordinator.swift, Sources/Model/FileSession.swift, Sources/UI/TableViewController.swift, Sources/UI/ComputedColumnPanelController.swift, Sources/App/AppDelegate.swift, Tests/QueryCoordinatorTests.swift, plans/prd.json
+- Build succeeds, all 70 tests pass (6 new)
+- **Learnings for future iterations:**
+  - `NSFont.italicSystemFont` doesn't exist in AppKit — use `NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)` instead
+  - Computed columns are virtual (only in SELECT), not in the DuckDB table schema — `FileSession.columns` stays unchanged, only `ViewState.computedColumns` and the table view track them
+  - The subquery approach `(SELECT *, (expr) AS name FROM data)` allows WHERE/ORDER BY/LIMIT to reference computed column names directly, since the outer query sees them as regular columns
+  - `updateSortIndicators()` needs to handle computed columns separately since they have no ColumnDescriptor — a dedicated `styleComputedHeaderCell` method preserves the formula indicator styling
+  - The row cache automatically includes computed column data because the page's `columnNames` array comes from the DuckDB result which now includes the computed column expressions in SELECT
+  - `configureColumns()` is called when base columns change (reload, column delete); it needs to re-add computed columns afterward since it removes all table columns first
+  - Computed column removal in AppDelegate also cleans up ViewState: removes sorts, filters, and selectedColumn referencing the deleted computed column
+----

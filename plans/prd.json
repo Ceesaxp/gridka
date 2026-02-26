@@ -320,7 +320,7 @@
         "Compiles and runs without crashes"
       ],
       "priority": 19,
-      "passes": false,
+      "passes": true,
       "notes": "Add computedColumns: [ComputedColumn] to ViewState. ComputedColumn is a struct with name: String and expression: String. QueryCoordinator.buildSelectClause() appends computed columns. The table's column list needs to include computed columns when refreshing columns."
     },
     {

@@ -100,6 +100,12 @@ final class TableViewController: NSViewController {
     /// Called when an analysis feature button is toggled. Parameters: (feature, isActive).
     var onAnalysisFeatureToggled: ((AnalysisFeature, Bool) -> Void)?
 
+    /// Called when 'Remove Computed Column' is selected from the header context menu.
+    var onComputedColumnRemoved: ((String) -> Void)?
+
+    /// Names of computed columns currently displayed.
+    private var computedColumnNames: Set<String> = []
+
     /// Row number gutter view.
     private var rowNumberView: RowNumberView?
     /// Whether row numbers are visible.
@@ -381,7 +387,77 @@ final class TableViewController: NSViewController {
             tableView.addTableColumn(makeTableColumn(for: descriptor))
         }
 
+        // Re-add any computed columns
+        if let session = fileSession {
+            for cc in session.viewState.computedColumns {
+                let col = makeComputedTableColumn(name: cc.name)
+                tableView.addTableColumn(col)
+                computedColumnNames.insert(cc.name)
+            }
+        }
+
         tableView.reloadData()
+    }
+
+    /// Adds a computed column to the table as the rightmost column.
+    func addComputedColumn(name: String) {
+        let col = makeComputedTableColumn(name: name)
+        tableView.addTableColumn(col)
+        computedColumnNames.insert(name)
+        tableView.reloadData()
+    }
+
+    /// Removes a computed column from the table display.
+    func removeComputedColumn(name: String) {
+        if let col = tableView.tableColumns.first(where: { $0.identifier.rawValue == name }) {
+            tableView.removeTableColumn(col)
+        }
+        computedColumnNames.remove(name)
+        tableView.reloadData()
+    }
+
+    /// Creates an NSTableColumn for a computed column with formula indicator.
+    private func makeComputedTableColumn(name: String) -> NSTableColumn {
+        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(name))
+        column.title = name.uppercased()
+        column.width = max((name as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: NSFont.systemFontSize)]).width + 50, 100)
+        column.minWidth = 50
+        column.maxWidth = 2000
+        column.headerToolTip = "Computed column"
+
+        let sparklineCell = SparklineHeaderCell()
+        column.headerCell = sparklineCell
+
+        // Style with formula indicator (ƒ prefix)
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.alignment = .left
+        paragraphStyle.lineBreakMode = .byTruncatingTail
+
+        let result = NSMutableAttributedString()
+
+        // Formula indicator icon
+        let formulaStr = NSAttributedString(string: "\u{0192} ", attributes: [
+            .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold),
+            .foregroundColor: NSColor.systemPurple,
+        ])
+        result.append(formulaStr)
+
+        // Column name (italic)
+        result.append(NSAttributedString(string: name.uppercased()))
+
+        result.addAttributes([
+            .font: NSFontManager.shared.convert(NSFont.systemFont(ofSize: NSFont.smallSystemFontSize), toHaveTrait: .italicFontMask),
+            .paragraphStyle: paragraphStyle,
+        ], range: NSRange(location: 0, length: result.length))
+
+        // Re-apply formula indicator style (italic overrides it)
+        result.addAttributes([
+            .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold),
+            .foregroundColor: NSColor.systemPurple,
+        ], range: NSRange(location: 0, length: 2))
+
+        column.headerCell.attributedStringValue = result
+        return column
     }
 
     // MARK: - Reload Helpers
@@ -405,7 +481,6 @@ final class TableViewController: NSViewController {
 
         for tableColumn in tableView.tableColumns {
             let columnName = tableColumn.identifier.rawValue
-            guard let descriptor = session.columns.first(where: { $0.name == columnName }) else { continue }
 
             var sortSuffix = ""
             if let sortIndex = sortColumns.firstIndex(where: { $0.column == columnName }) {
@@ -419,7 +494,13 @@ final class TableViewController: NSViewController {
             }
 
             let isSelected = (columnName == selectedColumn)
-            styleHeaderCell(tableColumn.headerCell, descriptor: descriptor, sortSuffix: sortSuffix, isSelected: isSelected)
+
+            if computedColumnNames.contains(columnName) {
+                // Re-style computed column header (preserving formula indicator)
+                styleComputedHeaderCell(tableColumn.headerCell, name: columnName, sortSuffix: sortSuffix, isSelected: isSelected)
+            } else if let descriptor = session.columns.first(where: { $0.name == columnName }) {
+                styleHeaderCell(tableColumn.headerCell, descriptor: descriptor, sortSuffix: sortSuffix, isSelected: isSelected)
+            }
         }
     }
 
@@ -865,8 +946,9 @@ final class TableViewController: NSViewController {
 
         let columnName = tableView.tableColumns[clickedCol].identifier.rawValue
 
-        // Don't allow editing the _gridka_rowid column
+        // Don't allow editing the _gridka_rowid column or computed columns
         guard columnName != "_gridka_rowid" else { return }
+        guard !computedColumnNames.contains(columnName) else { return }
 
         beginEditing(row: clickedRow, column: clickedCol, columnName: columnName)
     }
@@ -1411,6 +1493,52 @@ final class TableViewController: NSViewController {
         headerCell.attributedStringValue = styled
     }
 
+    /// Styles a computed column header cell with formula indicator, sort suffix, and selection state.
+    private func styleComputedHeaderCell(_ headerCell: NSTableHeaderCell, name: String, sortSuffix: String = "", isSelected: Bool = false) {
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.alignment = .left
+        paragraphStyle.lineBreakMode = .byTruncatingTail
+
+        let result = NSMutableAttributedString()
+
+        // Formula indicator
+        result.append(NSAttributedString(string: "\u{0192} ", attributes: [
+            .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold),
+            .foregroundColor: NSColor.systemPurple,
+        ]))
+
+        // Column name (italic)
+        result.append(NSAttributedString(string: name.uppercased()))
+
+        // Sort suffix
+        if !sortSuffix.isEmpty {
+            result.append(NSAttributedString(string: " \(sortSuffix)"))
+        }
+
+        // Apply italic font to the whole string
+        result.addAttributes([
+            .font: NSFontManager.shared.convert(NSFont.systemFont(ofSize: NSFont.smallSystemFontSize), toHaveTrait: .italicFontMask),
+            .paragraphStyle: paragraphStyle,
+        ], range: NSRange(location: 0, length: result.length))
+
+        // Re-apply formula indicator style
+        result.addAttributes([
+            .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold),
+            .foregroundColor: NSColor.systemPurple,
+        ], range: NSRange(location: 0, length: 2))
+
+        // Apply selection tint
+        if isSelected {
+            result.addAttribute(
+                .backgroundColor,
+                value: NSColor.controlAccentColor.withAlphaComponent(0.15),
+                range: NSRange(location: 0, length: result.length)
+            )
+        }
+
+        headerCell.attributedStringValue = result
+    }
+
     private func widthForColumn(_ descriptor: ColumnDescriptor) -> CGFloat {
         let headerWidth = (descriptor.name as NSString).size(
             withAttributes: [.font: NSFont.systemFont(ofSize: NSFont.systemFontSize)]
@@ -1682,7 +1810,26 @@ extension TableViewController: NSMenuDelegate {
 
         let tableColumn = tableView.tableColumns[clickedColumnIndex]
         let columnName = tableColumn.identifier.rawValue
-        guard session.columns.contains(where: { $0.name == columnName }) else { return }
+        let isComputed = computedColumnNames.contains(columnName)
+        guard isComputed || session.columns.contains(where: { $0.name == columnName }) else { return }
+
+        // Computed columns get a simplified context menu
+        if isComputed {
+            // Filter option for computed columns
+            let filterItem = NSMenuItem(title: "Filter \"\(columnName)\"…", action: #selector(filterColumnClicked(_:)), keyEquivalent: "")
+            filterItem.target = self
+            filterItem.representedObject = columnName as NSString
+            menu.addItem(filterItem)
+
+            menu.addItem(NSMenuItem.separator())
+
+            // Remove Computed Column option
+            let removeItem = NSMenuItem(title: "Remove Computed Column", action: #selector(removeComputedColumnClicked(_:)), keyEquivalent: "")
+            removeItem.target = self
+            removeItem.representedObject = columnName as NSString
+            menu.addItem(removeItem)
+            return
+        }
 
         // Filter option
         let filterItem = NSMenuItem(title: "Filter \"\(columnName)\"…", action: #selector(filterColumnClicked(_:)), keyEquivalent: "")
@@ -1896,6 +2043,11 @@ extension TableViewController: NSMenuDelegate {
             guard response == .alertFirstButtonReturn else { return }
             self?.onColumnDeleted?(columnName)
         }
+    }
+
+    @objc private func removeComputedColumnClicked(_ sender: NSMenuItem) {
+        guard let columnName = sender.representedObject as? String else { return }
+        onComputedColumnRemoved?(columnName)
     }
 
     @objc private func valueFrequencyClicked(_ sender: NSMenuItem) {

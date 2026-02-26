@@ -14,6 +14,13 @@ struct SortColumn: Equatable, Hashable {
     let direction: SortDirection
 }
 
+// MARK: - ComputedColumn
+
+struct ComputedColumn: Equatable, Hashable {
+    let name: String
+    let expression: String
+}
+
 // MARK: - ViewState
 
 struct ViewState: Equatable {
@@ -24,6 +31,8 @@ struct ViewState: Equatable {
     var totalFilteredRows: Int
     /// The currently selected column name (clicked header). Drives the Profiler sidebar.
     var selectedColumn: String? = nil
+    /// Computed columns defined by the user via Add Computed Column dialog.
+    var computedColumns: [ComputedColumn] = []
 
     static func == (lhs: ViewState, rhs: ViewState) -> Bool {
         lhs.sortColumns == rhs.sortColumns
@@ -32,5 +41,6 @@ struct ViewState: Equatable {
             && lhs.visibleRange == rhs.visibleRange
             && lhs.totalFilteredRows == rhs.totalFilteredRows
             && lhs.selectedColumn == rhs.selectedColumn
+            && lhs.computedColumns == rhs.computedColumns
     }
 }

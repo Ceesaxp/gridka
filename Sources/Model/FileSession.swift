@@ -1854,8 +1854,10 @@ final class FileSession {
     func updateViewState(_ newState: ViewState) {
         let countChanged = newState.filters != viewState.filters
             || newState.searchTerm != viewState.searchTerm
+        let computedColumnsChanged = newState.computedColumns != viewState.computedColumns
         let cacheInvalidated = countChanged
             || newState.sortColumns != viewState.sortColumns
+            || computedColumnsChanged
 
         viewState = newState
 

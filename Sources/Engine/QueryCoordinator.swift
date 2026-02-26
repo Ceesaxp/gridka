@@ -5,7 +5,8 @@ final class QueryCoordinator {
     // MARK: - Public Query Builders
 
     func buildQuery(for state: ViewState, columns: [ColumnDescriptor], range: Range<Int>) -> String {
-        var parts = ["SELECT * FROM data"]
+        let source = buildSourceExpression(for: state)
+        var parts = ["SELECT * FROM \(source)"]
 
         let whereClause = buildWhereClause(for: state, columns: columns)
         if !whereClause.isEmpty {
@@ -25,7 +26,8 @@ final class QueryCoordinator {
     }
 
     func buildCountQuery(for state: ViewState, columns: [ColumnDescriptor]) -> String {
-        var parts = ["SELECT COUNT(*) FROM data"]
+        let source = buildSourceExpression(for: state)
+        var parts = ["SELECT COUNT(*) FROM \(source)"]
 
         let whereClause = buildWhereClause(for: state, columns: columns)
         if !whereClause.isEmpty {
@@ -60,6 +62,16 @@ final class QueryCoordinator {
 
     // MARK: - Private Builders
 
+    /// Returns the FROM source: plain "data" when no computed columns exist,
+    /// or a subquery "(SELECT *, (expr) AS name, ... FROM data)" when they do.
+    private func buildSourceExpression(for state: ViewState) -> String {
+        guard !state.computedColumns.isEmpty else { return "data" }
+        let computedParts = state.computedColumns.map { cc in
+            "(\(cc.expression)) AS \(QueryCoordinator.quote(cc.name))"
+        }
+        return "(SELECT *, \(computedParts.joined(separator: ", ")) FROM data)"
+    }
+
     private func buildWhereClause(for state: ViewState, columns: [ColumnDescriptor]) -> String {
         var conditions: [String] = []
 
@@ -70,7 +82,7 @@ final class QueryCoordinator {
         }
 
         if let searchTerm = state.searchTerm, !searchTerm.isEmpty {
-            let searchCondition = buildSearchCondition(searchTerm, columns: columns)
+            let searchCondition = buildSearchCondition(searchTerm, columns: columns, computedColumns: state.computedColumns)
             if !searchCondition.isEmpty {
                 conditions.append("(\(searchCondition))")
             }
@@ -187,11 +199,15 @@ final class QueryCoordinator {
         }
     }
 
-    private func buildSearchCondition(_ searchTerm: String, columns: [ColumnDescriptor]) -> String {
+    private func buildSearchCondition(_ searchTerm: String, columns: [ColumnDescriptor], computedColumns: [ComputedColumn] = []) -> String {
         let escapedTerm = QueryCoordinator.escape(searchTerm)
-        let conditions = columns
+        var conditions = columns
             .filter { $0.name != "_gridka_rowid" }
             .map { "CAST(\(QueryCoordinator.quote($0.name)) AS TEXT) ILIKE '%\(escapedTerm)%' ESCAPE '\\'" }
+        // Include computed columns in global search
+        for cc in computedColumns {
+            conditions.append("CAST(\(QueryCoordinator.quote(cc.name)) AS TEXT) ILIKE '%\(escapedTerm)%' ESCAPE '\\'")
+        }
         return conditions.joined(separator: " OR ")
     }
 

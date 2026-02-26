@@ -93,6 +93,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             }
         }
 
+        // US-019: Add computed column to table when user confirms
+        ComputedColumnPanelController.onAddColumn = { [weak self] name, expression in
+            self?.handleComputedColumnAdded(name: name, expression: expression)
+        }
+
         if windowTabs.isEmpty {
             let win = createWindow()
             let tab = TabContext()
@@ -679,6 +684,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             self.handleColumnDeleted(tab: tab, columnName: columnName)
         }
 
+        tvc.onComputedColumnRemoved = { [weak self, weak tvc] columnName in
+            guard let self = self, let tvc = tvc, let tab = self.tab(for: tvc) else { return }
+            self.handleComputedColumnRemoved(tab: tab, columnName: columnName)
+        }
+
         tvc.onValueFrequency = { [weak tvc] columnName in
             guard let tvc = tvc, let session = tvc.fileSession else { return }
             FrequencyPanelController.show(column: columnName, fileSession: session)
@@ -1079,6 +1089,73 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
         ComputedColumnPanelController.show(fileSession: session)
         tvc.analysisBar.setFeatureActive(.computedColumn, active: true)
+    }
+
+    // MARK: - Computed Column Add/Remove (US-019)
+
+    private func handleComputedColumnAdded(name: String, expression: String) {
+        guard let tab = activeTab else { return }
+        guard let session = tab.fileSession, let tvc = tab.tableViewController else { return }
+
+        let cc = ComputedColumn(name: name, expression: expression)
+        var newState = session.viewState
+        newState.computedColumns.append(cc)
+        session.updateViewState(newState)
+
+        // Add the computed column to the table display
+        tvc.addComputedColumn(name: name)
+
+        let startTime = CFAbsoluteTimeGetCurrent()
+
+        // Re-fetch page 0 with the new computed column in the SELECT
+        session.fetchPage(index: 0) { result in
+            let queryTime = CFAbsoluteTimeGetCurrent() - startTime
+
+            switch result {
+            case .success:
+                tvc.reloadVisibleRows()
+                tvc.statusBar.showQueryTime(queryTime)
+            case .failure:
+                break
+            }
+
+            tvc.statusBar.updateRowCount(
+                showing: session.viewState.totalFilteredRows,
+                total: session.totalRows
+            )
+        }
+
+        tvc.reloadVisibleRows()
+    }
+
+    private func handleComputedColumnRemoved(tab: TabContext, columnName: String) {
+        guard let session = tab.fileSession, let tvc = tab.tableViewController else { return }
+
+        var newState = session.viewState
+        newState.computedColumns.removeAll { $0.name == columnName }
+
+        // Also remove any sorts/filters referencing this column
+        newState.sortColumns.removeAll { $0.column == columnName }
+        newState.filters.removeAll { $0.column == columnName }
+        if newState.selectedColumn == columnName {
+            newState.selectedColumn = nil
+        }
+        session.updateViewState(newState)
+
+        // Remove the column from the table display
+        tvc.removeComputedColumn(name: columnName)
+        tvc.updateSortIndicators()
+        tvc.updateFilterBar()
+
+        // Re-fetch page 0 without the removed computed column
+        session.fetchPage(index: 0) { _ in
+            tvc.reloadVisibleRows()
+        }
+
+        tvc.statusBar.updateRowCount(
+            showing: session.viewState.totalFilteredRows,
+            total: session.totalRows
+        )
     }
 
     // MARK: - Rename Column (from Edit menu)

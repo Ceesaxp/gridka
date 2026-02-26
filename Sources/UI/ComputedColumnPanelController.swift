@@ -56,7 +56,11 @@ final class ComputedColumnPanelController: NSWindowController, NSWindowDelegate 
 
     private init(fileSession: FileSession) {
         self.fileSession = fileSession
-        self.existingColumnNames = Set(fileSession.columns.map(\.name))
+        var names = Set(fileSession.columns.map(\.name))
+        for cc in fileSession.viewState.computedColumns {
+            names.insert(cc.name)
+        }
+        self.existingColumnNames = names
 
         let panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 520, height: 560),
