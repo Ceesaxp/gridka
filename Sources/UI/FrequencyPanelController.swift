@@ -124,6 +124,8 @@ final class FrequencyPanelController: NSWindowController, NSWindowDelegate, NSSp
     private var cachedMaxCount: Int = 1
     /// Generation counter: incremented on each load request. Stale responses are discarded.
     private var loadGeneration: Int = 0
+    /// Delayed single-click work item — cancelled if a double-click follows.
+    private var pendingClickWorkItem: DispatchWorkItem?
 
     private struct FrequencyRow {
         let rank: Int
@@ -455,10 +457,21 @@ final class FrequencyPanelController: NSWindowController, NSWindowDelegate, NSSp
         guard row >= 0, row < displayRows.count, !isBinned,
               let session = fileSession else { return }
         let value = displayRows[row].value
-        FrequencyPanelController.onValueClicked?(columnName, value, session)
+        let col = columnName
+        // Delay single-click so a double-click can cancel it and avoid duplicate filter application
+        pendingClickWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.pendingClickWorkItem = nil
+            FrequencyPanelController.onValueClicked?(col, value, session)
+        }
+        pendingClickWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + NSEvent.doubleClickInterval, execute: workItem)
     }
 
     @objc private func tableRowDoubleClicked() {
+        // Cancel the pending single-click to avoid duplicate filter application
+        pendingClickWorkItem?.cancel()
+        pendingClickWorkItem = nil
         let row = tableView.clickedRow
         guard row >= 0, row < displayRows.count, !isBinned,
               let session = fileSession else { return }
