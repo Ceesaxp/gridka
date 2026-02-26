@@ -28,6 +28,7 @@ final class SettingsManager {
         static let dateFormat = "GridkaDateFormat"
         static let thousandsSeparator = "GridkaThousandsSeparator"
         static let decimalComma = "GridkaDecimalComma"
+        static let analysisToolbarVisible = "GridkaAnalysisToolbarVisible"
     }
 
     private init() {}
@@ -73,6 +74,16 @@ final class SettingsManager {
             if newValue && useThousandsSeparator {
                 UserDefaults.standard.set(false, forKey: Keys.thousandsSeparator)
             }
+            notifyChange()
+        }
+    }
+
+    var analysisToolbarVisible: Bool {
+        get {
+            return UserDefaults.standard.bool(forKey: Keys.analysisToolbarVisible)
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: Keys.analysisToolbarVisible)
             notifyChange()
         }
     }

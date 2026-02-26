@@ -9,6 +9,7 @@ final class TableViewController: NSViewController {
     private(set) var statusBar: StatusBarView!
     private(set) var filterBar: FilterBarView!
     private(set) var searchBar: SearchBarView!
+    private(set) var analysisBar: AnalysisToolbarView!
     private(set) var detailPane: DetailPaneView!
     private var splitView: NSSplitView!
 
@@ -79,6 +80,9 @@ final class TableViewController: NSViewController {
 
     /// Called when a column is selected via header click. Parameter: columnName (nil to deselect).
     var onColumnSelected: ((String?) -> Void)?
+
+    /// Called when an analysis feature button is toggled. Parameters: (feature, isActive).
+    var onAnalysisFeatureToggled: ((AnalysisFeature, Bool) -> Void)?
 
     /// Row number gutter view.
     private var rowNumberView: RowNumberView?
@@ -181,6 +185,11 @@ final class TableViewController: NSViewController {
             self?.view.window?.makeFirstResponder(self?.tableView)
         }
 
+        analysisBar = AnalysisToolbarView()
+        analysisBar.onFeatureToggled = { [weak self] feature, isActive in
+            self?.onAnalysisFeatureToggled?(feature, isActive)
+        }
+
         statusBar = StatusBarView()
         detailPane = DetailPaneView()
 
@@ -201,12 +210,14 @@ final class TableViewController: NSViewController {
         // on top of the split view when they become visible.
         container.filterBar = filterBar
         container.searchBar = searchBar
+        container.analysisBar = analysisBar
         container.splitView = splitView
         container.statusBar = statusBar
         container.addSubview(splitView)
         container.addSubview(statusBar)
         container.addSubview(filterBar)
         container.addSubview(searchBar)
+        container.addSubview(analysisBar)
 
         self.view = container
 
@@ -227,6 +238,11 @@ final class TableViewController: NSViewController {
             object: nil
         )
         updateFormattersFromSettings()
+
+        // Restore analysis toolbar visibility from persisted settings
+        if SettingsManager.shared.analysisToolbarVisible {
+            analysisBar.setVisible(true)
+        }
     }
 
     @objc private func settingsDidChange(_ notification: Notification) {
@@ -551,6 +567,12 @@ final class TableViewController: NSViewController {
         } else {
             splitView.arrangedSubviews[1].isHidden = true
         }
+    }
+
+    func toggleAnalysisToolbar() {
+        let newVisible = !analysisBar.isToolbarVisible
+        analysisBar.setVisible(newVisible)
+        SettingsManager.shared.analysisToolbarVisible = newVisible
     }
 
     func updateDetailPane() {
@@ -1739,6 +1761,7 @@ private final class AutoFitTableHeaderView: NSTableHeaderView {
 final class GridkaContainerView: NSView {
     var filterBar: NSView!
     var searchBar: NSView!
+    var analysisBar: NSView!
     var splitView: NSView!
     var statusBar: NSView!
 
@@ -1755,8 +1778,11 @@ final class GridkaContainerView: NSView {
         let statusH: CGFloat = 22
         let filterH: CGFloat = filterBar.isHidden ? 0 : (filterBar as? FilterBarView)?.currentHeight ?? 0
         let searchH: CGFloat = searchBar.isHidden ? 0 : (searchBar as? SearchBarView)?.currentHeight ?? 0
+        let analysisH: CGFloat = analysisBar?.isHidden ?? true ? 0 : (analysisBar as? AnalysisToolbarView)?.currentHeight ?? 0
 
         var y: CGFloat = 0
+        analysisBar?.frame = NSRect(x: 0, y: y, width: w, height: analysisH)
+        y += analysisH
         filterBar.frame = NSRect(x: 0, y: y, width: w, height: filterH)
         y += filterH
         searchBar.frame = NSRect(x: 0, y: y, width: w, height: searchH)

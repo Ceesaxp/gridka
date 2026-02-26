@@ -235,6 +235,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         toggleDetailItem.target = self
         viewMenu.addItem(toggleDetailItem)
 
+        let toggleAnalysisItem = NSMenuItem(title: "Show Analysis Toolbar", action: #selector(toggleAnalysisToolbarAction(_:)), keyEquivalent: "t")
+        toggleAnalysisItem.keyEquivalentModifierMask = [.command, .option]
+        toggleAnalysisItem.target = self
+        viewMenu.addItem(toggleAnalysisItem)
+
         viewMenu.addItem(NSMenuItem.separator())
 
         let headerToggleItem = NSMenuItem(title: "First Row as Header", action: #selector(toggleHeaderAction(_:)), keyEquivalent: "")
@@ -628,6 +633,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             self.handleColumnSelected(tab: tab, columnName: columnName)
         }
 
+        tvc.onAnalysisFeatureToggled = { [weak self, weak tvc] feature, isActive in
+            guard let self = self, let tvc = tvc, let tab = self.tab(for: tvc) else { return }
+            self.handleAnalysisFeatureToggled(tab: tab, feature: feature, isActive: isActive)
+        }
+
         tab.tableViewController = tvc
         tab.containerView = tvc.view
     }
@@ -731,6 +741,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     @objc private func toggleDetailPaneAction(_ sender: Any?) {
         activeTab?.tableViewController?.toggleDetailPane()
+    }
+
+    @objc private func toggleAnalysisToolbarAction(_ sender: Any?) {
+        activeTab?.tableViewController?.toggleAnalysisToolbar()
     }
 
     // MARK: - Header Toggle
@@ -1221,6 +1235,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         tvc.updateSortIndicators()
     }
 
+    // MARK: - Analysis Feature Handling
+
+    private func handleAnalysisFeatureToggled(tab: TabContext, feature: AnalysisFeature, isActive: Bool) {
+        // Placeholder: individual analysis features (Profiler, Frequency, Group By,
+        // Computed Column) are implemented in later stories (US-003+).
+        // The toolbar button toggle state is already tracked by AnalysisToolbarView.
+    }
+
     // MARK: - Search Handling
 
     @objc private func performFind(_ sender: Any?) {
@@ -1361,6 +1383,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 menuItem.state = .off
             }
             return session?.isFullyLoaded ?? false
+        }
+        if menuItem.action == #selector(toggleAnalysisToolbarAction(_:)) {
+            let visible = tvc?.analysisBar?.isToolbarVisible ?? false
+            menuItem.title = visible ? "Hide Analysis Toolbar" : "Show Analysis Toolbar"
+            return tvc != nil
         }
         return true
     }
