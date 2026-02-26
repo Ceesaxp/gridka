@@ -1667,47 +1667,141 @@ extension AppDelegate: NSWindowDelegate {
         }
 
         guard let tab = windowTabs[sender] else { return true }
-        guard let session = tab.fileSession, session.isModified else {
-            // No unsaved changes — allow close immediately
+        guard let session = tab.fileSession else { return true }
+
+        let hasUnsavedEdits = session.isModified
+        let hasComputedColumns = !session.viewState.computedColumns.isEmpty
+
+        // No unsaved changes and no computed columns — allow close immediately
+        if !hasUnsavedEdits && !hasComputedColumns {
             return true
         }
 
-        // Show save prompt for unsaved changes
-        let filename = session.filePath.lastPathComponent
-        let alert = NSAlert()
-        alert.messageText = "Save changes to \"\(filename)\" before closing?"
-        alert.informativeText = "Your changes will be lost if you don't save them."
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Save")        // First button = .alertFirstButtonReturn
-        alert.addButton(withTitle: "Don't Save")   // Second button = .alertSecondButtonReturn
-        alert.addButton(withTitle: "Cancel")        // Third button = .alertThirdButtonReturn
+        if hasUnsavedEdits {
+            // Show save prompt for unsaved changes
+            let filename = session.filePath.lastPathComponent
+            let alert = NSAlert()
+            alert.messageText = "Save changes to \"\(filename)\" before closing?"
+            alert.informativeText = "Your changes will be lost if you don't save them."
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "Save")        // First button = .alertFirstButtonReturn
+            alert.addButton(withTitle: "Don't Save")   // Second button = .alertSecondButtonReturn
+            alert.addButton(withTitle: "Cancel")        // Third button = .alertThirdButtonReturn
 
-        alert.beginSheetModal(for: sender) { [weak self, weak sender] response in
-            guard let self = self, let sender = sender else { return }
-            switch response {
-            case .alertFirstButtonReturn:
-                // Save, then close
-                session.save { [weak self, weak sender] result in
-                    guard let self = self, let sender = sender else { return }
-                    switch result {
-                    case .success:
+            alert.beginSheetModal(for: sender) { [weak self, weak sender] response in
+                guard let self = self, let sender = sender else { return }
+                switch response {
+                case .alertFirstButtonReturn:
+                    // Save, then close
+                    session.save { [weak self, weak sender] result in
+                        guard let self = self, let sender = sender else { return }
+                        switch result {
+                        case .success:
+                            if hasComputedColumns {
+                                // After saving edits, prompt about computed columns
+                                self.showComputedColumnsSavePrompt(for: sender, session: session)
+                            } else {
+                                self.windowsClosingAfterPrompt.insert(sender)
+                                sender.close()
+                            }
+                        case .failure(let error):
+                            self.showError(error, context: "saving file")
+                        }
+                    }
+                case .alertSecondButtonReturn:
+                    // Don't Save edits
+                    if hasComputedColumns {
+                        // Still prompt about computed columns
+                        self.showComputedColumnsSavePrompt(for: sender, session: session)
+                    } else {
                         self.windowsClosingAfterPrompt.insert(sender)
                         sender.close()
-                    case .failure(let error):
-                        self.showError(error, context: "saving file")
                     }
+                default:
+                    // Cancel — do nothing, keep the window open
+                    break
                 }
+            }
+        } else {
+            // Only computed columns (no unsaved edits) — prompt about computed columns
+            showComputedColumnsSavePrompt(for: sender, session: session)
+        }
+
+        return false // Don't close yet — the alert/save-panel handler will close if needed
+    }
+
+    /// Shows an alert prompting the user to save computed columns before closing.
+    /// Options: "Save As..." (opens NSSavePanel), "Discard" (closes without saving), "Cancel" (stays).
+    private func showComputedColumnsSavePrompt(for window: NSWindow, session: FileSession) {
+        let alert = NSAlert()
+        alert.messageText = "This tab has computed columns."
+        alert.informativeText = "Save a copy with computed values included?"
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Save As…")     // First button = .alertFirstButtonReturn
+        alert.addButton(withTitle: "Discard")       // Second button = .alertSecondButtonReturn
+        alert.addButton(withTitle: "Cancel")        // Third button = .alertThirdButtonReturn
+
+        alert.beginSheetModal(for: window) { [weak self, weak window] response in
+            guard let self = self, let window = window else { return }
+            switch response {
+            case .alertFirstButtonReturn:
+                // Save As — show NSSavePanel
+                self.showComputedColumnsExportPanel(for: window, session: session)
             case .alertSecondButtonReturn:
-                // Don't Save — close without saving
-                self.windowsClosingAfterPrompt.insert(sender)
-                sender.close()
+                // Discard — close without saving computed columns
+                self.windowsClosingAfterPrompt.insert(window)
+                window.close()
             default:
-                // Cancel — do nothing, keep the window open
+                // Cancel — keep the window open
                 break
             }
         }
+    }
 
-        return false // Don't close yet — the alert handler will close if needed
+    /// Shows an NSSavePanel and exports data with computed columns to the chosen path.
+    private func showComputedColumnsExportPanel(for window: NSWindow, session: FileSession) {
+        let savePanel = NSSavePanel()
+        savePanel.allowedContentTypes = [.commaSeparatedText]
+        savePanel.nameFieldStringValue = session.filePath.deletingPathExtension().lastPathComponent + "_computed.csv"
+        savePanel.canCreateDirectories = true
+
+        savePanel.beginSheetModal(for: window) { [weak self, weak window] response in
+            guard let self = self, let window = window else { return }
+            guard response == .OK, let url = savePanel.url else {
+                // User cancelled the save panel — return to the tab (don't close)
+                return
+            }
+
+            // Show progress indicator
+            let progress = NSProgressIndicator(frame: NSRect(x: 0, y: 0, width: 32, height: 32))
+            progress.style = .spinning
+            progress.controlSize = .regular
+            progress.startAnimation(nil)
+            progress.translatesAutoresizingMaskIntoConstraints = false
+
+            let overlay = NSView(frame: window.contentView?.bounds ?? .zero)
+            overlay.wantsLayer = true
+            overlay.layer?.backgroundColor = NSColor(white: 0, alpha: 0.3).cgColor
+            overlay.autoresizingMask = [.width, .height]
+            overlay.addSubview(progress)
+            NSLayoutConstraint.activate([
+                progress.centerXAnchor.constraint(equalTo: overlay.centerXAnchor),
+                progress.centerYAnchor.constraint(equalTo: overlay.centerYAnchor)
+            ])
+            window.contentView?.addSubview(overlay)
+
+            session.exportWithComputedColumns(to: url) { [weak self, weak window, weak overlay] result in
+                overlay?.removeFromSuperview()
+                guard let self = self, let window = window else { return }
+                switch result {
+                case .success:
+                    self.windowsClosingAfterPrompt.insert(window)
+                    window.close()
+                case .failure(let error):
+                    self.showError(error, context: "exporting with computed columns")
+                }
+            }
+        }
     }
 
     func windowWillClose(_ notification: Notification) {

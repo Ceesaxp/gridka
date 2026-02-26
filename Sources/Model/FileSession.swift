@@ -599,6 +599,41 @@ final class FileSession {
         }
     }
 
+    // MARK: - Export with Computed Columns
+
+    /// Exports all rows including computed columns to a new CSV file via DuckDB COPY.
+    /// The query includes computed column expressions: SELECT *, (expr1) AS name1, ... FROM data.
+    /// The original file is never modified.
+    func exportWithComputedColumns(to url: URL, completion: @escaping (Result<Void, Error>) -> Void) {
+        let source = queryCoordinator.buildSourceExpression(for: viewState)
+
+        // Build explicit column list excluding _gridka_rowid
+        var exportColumns = columns
+            .filter { $0.name != "_gridka_rowid" }
+            .map { QueryCoordinator.quote($0.name) }
+        // Append computed column names
+        for cc in viewState.computedColumns {
+            exportColumns.append(QueryCoordinator.quote(cc.name))
+        }
+        let columnList = exportColumns.joined(separator: ", ")
+
+        let path = url.path.replacingOccurrences(of: "'", with: "''")
+        let sql = "COPY (SELECT \(columnList) FROM \(source)) TO '\(path)' (FORMAT CSV, HEADER true, DELIMITER ',', FORCE_QUOTE *)"
+
+        queryQueue.async { [weak self] in
+            do {
+                try self?.engine.execute(sql)
+                DispatchQueue.main.async {
+                    completion(.success(()))
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    completion(.failure(error))
+                }
+            }
+        }
+    }
+
     // MARK: - Add Column
 
     /// Adds a new column to the data table via ALTER TABLE.

@@ -337,7 +337,7 @@
         "Compiles and runs without crashes"
       ],
       "priority": 20,
-      "passes": false,
+      "passes": true,
       "notes": "Use DuckDB's COPY TO for CSV export: COPY (SELECT *, computed_cols FROM data) TO 'path.csv' (HEADER, DELIMITER ','). Show NSProgressIndicator during export. The Save As file path comes from NSSavePanel."
     },
     {

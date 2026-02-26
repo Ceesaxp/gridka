@@ -1319,3 +1319,34 @@
   - `configureColumns()` is called when base columns change (reload, column delete); it needs to re-add computed columns afterward since it removes all table columns first
   - Computed column removal in AppDelegate also cleans up ViewState: removes sorts, filters, and selectedColumn referencing the deleted computed column
 ----
+
+## 2026-02-26 - US-020 - Save As prompt for tabs with computed columns
+- Added `exportWithComputedColumns(to:completion:)` method to FileSession:
+  - Uses `QueryCoordinator.buildSourceExpression()` to build the source subquery with computed column expressions
+  - Builds explicit column list: base columns (excluding _gridka_rowid) + computed column names
+  - Exports via DuckDB `COPY (SELECT columns FROM source) TO 'path' (FORMAT CSV, HEADER true, DELIMITER ',', FORCE_QUOTE *)`
+  - Runs on serial `queryQueue`, completes on main thread — original file never modified
+- Modified `windowShouldClose(_:)` in AppDelegate to detect computed columns:
+  - Checks both `session.isModified` (unsaved edits) and `!session.viewState.computedColumns.isEmpty` (computed columns present)
+  - When only edits: shows existing save prompt (Save/Don't Save/Cancel)
+  - When only computed columns: shows computed columns prompt directly
+  - When both: shows edit save prompt first, then chains to computed columns prompt after edit save/discard
+- Added `showComputedColumnsSavePrompt(for:session:)`:
+  - NSAlert with message "This tab has computed columns." and informative text "Save a copy with computed values included?"
+  - Three buttons: "Save As…" (opens NSSavePanel), "Discard" (closes without saving), "Cancel" (stays on tab)
+- Added `showComputedColumnsExportPanel(for:session:)`:
+  - NSSavePanel with `.commaSeparatedText` content type, default filename `<original>_computed.csv`
+  - Semi-transparent overlay with spinning NSProgressIndicator during export
+  - On success: overlay removed, window closes via `windowsClosingAfterPrompt` set
+  - On failure: overlay removed, error shown via `showError`
+  - Cancel on save panel returns to tab without closing
+- Files changed: Sources/Model/FileSession.swift, Sources/App/AppDelegate.swift, plans/prd.json
+- Build succeeds, all 71 tests pass
+- **Learnings for future iterations:**
+  - The `windowShouldClose` → alert → save panel chain requires careful handling of weak references and the `windowsClosingAfterPrompt` set to prevent infinite recursion
+  - When both `isModified` and computed columns are present, the save prompt must chain: first handle edits (save/discard), then handle computed columns (save as/discard) — two sequential async prompts
+  - `QueryCoordinator.buildSourceExpression()` already encapsulates the computed column subquery logic — reusing it for export avoids duplicating the SQL generation
+  - NSSavePanel.beginSheetModal is async — the export must happen in the completion handler, and the progress overlay must be added/removed on main thread
+  - The export intentionally does NOT update `session.filePath` or `session.isModified` — the original file is untouched and the computed columns remain in the ViewState (the tab is about to close anyway)
+  - The semi-transparent overlay prevents user interaction with the table during export and provides visual feedback for large file exports
+----
