@@ -623,6 +623,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             self.handleColumnDeleted(tab: tab, columnName: columnName)
         }
 
+        tvc.onColumnSelected = { [weak self, weak tvc] columnName in
+            guard let self = self, let tvc = tvc, let tab = self.tab(for: tvc) else { return }
+            self.handleColumnSelected(tab: tab, columnName: columnName)
+        }
+
         tab.tableViewController = tvc
         tab.containerView = tvc.view
     }
@@ -1202,6 +1207,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 self?.showError(error, context: "deleting column")
             }
         }
+    }
+
+    // MARK: - Column Selection Handling
+
+    private func handleColumnSelected(tab: TabContext, columnName: String?) {
+        guard let session = tab.fileSession, let tvc = tab.tableViewController else { return }
+
+        var newState = session.viewState
+        newState.selectedColumn = columnName
+        session.updateViewState(newState)
+
+        tvc.updateSortIndicators()
     }
 
     // MARK: - Search Handling

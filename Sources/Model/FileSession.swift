@@ -649,6 +649,11 @@ final class FileSession {
                         return f
                     }
 
+                    // Update ViewState: rename selected column
+                    if self.viewState.selectedColumn == oldName {
+                        self.viewState.selectedColumn = newName
+                    }
+
                     // Update edited cells: rename column references
                     let updatedEdited = Set(self.editedCells.map { cell in
                         if cell.column == oldName {
@@ -759,6 +764,11 @@ final class FileSession {
 
                     // Remove any filters referencing the deleted column
                     self.viewState.filters.removeAll { $0.column == name }
+
+                    // Clear selected column if it was deleted
+                    if self.viewState.selectedColumn == name {
+                        self.viewState.selectedColumn = nil
+                    }
 
                     // Remove edited cell indicators for the deleted column
                     self.editedCells = self.editedCells.filter { $0.column != name }

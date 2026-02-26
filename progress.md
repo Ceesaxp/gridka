@@ -787,3 +787,27 @@
   - `beginSheetModal` is async — the tab creation must happen in the completion handler, not after the alert call. This required extracting `createTabAndOpenFile` and `createEmptyTab` helper methods
   - When changing `guard self != nil` to `guard let self = self` in a closure, all subsequent uses of `self?.method` must change to `self.method` — leaving `self?` causes a compile error since `self` is now non-optional
 ----
+
+## 2026-02-26 - US-001 - Rewire column header click to select instead of sort
+- Added `selectedColumn: String? = nil` to ViewState struct with Equatable support
+- Changed `tableView(_:didClick:)` in TableViewController: plain click now selects the column (toggle on/off), Option+click triggers sort (ascending → descending → remove cycle), Shift+Option+click adds to multi-column sort
+- Added `onColumnSelected: ((String?) -> Void)?` callback on TableViewController, wired through AppDelegate to `handleColumnSelected` which updates ViewState.selectedColumn
+- Visual highlight: selected column header gets a tinted background via `NSAttributedString` `.backgroundColor` attribute using `controlAccentColor.withAlphaComponent(0.15)`
+- Sort indicator glyph (▲/▼ arrows) remains visible in sorted column headers as before
+- Clickable sort indicator area: AutoFitTableHeaderView now detects clicks in the rightmost 24pt of sorted column headers and routes them to `handleSortIndicatorClick()` which triggers sort cycling without requiring the Option key
+- AutoFitTableHeaderView gained `sortIndicatorColumnIndex(at:)` method that checks if a click point falls within the sort indicator area of a currently-sorted column
+- `handleSortIndicatorClick(columnIndex:event:)` added to TableViewController — replicates sort cycling logic (ascending → descending → remove, Shift for multi-sort)
+- FileSession.renameColumn: now updates `viewState.selectedColumn` when the selected column is renamed
+- FileSession.deleteColumn: now clears `viewState.selectedColumn` when the selected column is deleted
+- FileSession.updateViewState: selectedColumn changes alone don't trigger cache invalidation or requery (correct — it's a UI-only state)
+- Right-click context menu preserved unchanged
+- Files changed: Sources/Model/ViewState.swift, Sources/UI/TableViewController.swift, Sources/App/AppDelegate.swift, Sources/Model/FileSession.swift, plans/prd.json
+- Build succeeds, all 64 tests pass
+- **Learnings for future iterations:**
+  - `NSEvent.modifierFlags.contains(.option)` detects the Option key — used to differentiate select (plain click) vs sort (Option+click)
+  - `NSAttributedString` `.backgroundColor` attribute is the simplest way to tint a header cell background without subclassing NSTableHeaderCell — works within the existing attributed string styling pipeline
+  - `var selectedColumn: String? = nil` in a struct gives a default value in the memberwise init, so existing call sites don't need to be updated
+  - AutoFitTableHeaderView's `mouseDown(with:)` already intercepts events before they reach `super.mouseDown` (which triggers `didClick` delegate) — adding sort indicator click detection here prevents it from being treated as a column select
+  - The sort indicator click width of 24pt provides enough target area for the arrow glyphs without making it too easy to accidentally click
+  - `selectedColumn` changes in ViewState don't affect data queries — `updateViewState` correctly only invalidates cache on sort/filter/search changes, not on selection changes
+----

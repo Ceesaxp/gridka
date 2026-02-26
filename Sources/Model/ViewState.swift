@@ -22,6 +22,8 @@ struct ViewState: Equatable {
     var searchTerm: String?
     var visibleRange: Range<Int>
     var totalFilteredRows: Int
+    /// The currently selected column name (clicked header). Drives the Profiler sidebar.
+    var selectedColumn: String? = nil
 
     static func == (lhs: ViewState, rhs: ViewState) -> Bool {
         lhs.sortColumns == rhs.sortColumns
@@ -29,5 +31,6 @@ struct ViewState: Equatable {
             && lhs.searchTerm == rhs.searchTerm
             && lhs.visibleRange == rhs.visibleRange
             && lhs.totalFilteredRows == rhs.totalFilteredRows
+            && lhs.selectedColumn == rhs.selectedColumn
     }
 }

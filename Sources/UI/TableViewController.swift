@@ -77,6 +77,9 @@ final class TableViewController: NSViewController {
     /// Called when a column is deleted via the header context menu. Parameter: columnName.
     var onColumnDeleted: ((String) -> Void)?
 
+    /// Called when a column is selected via header click. Parameter: columnName (nil to deselect).
+    var onColumnSelected: ((String?) -> Void)?
+
     /// Row number gutter view.
     private var rowNumberView: RowNumberView?
     /// Whether row numbers are visible.
@@ -320,11 +323,12 @@ final class TableViewController: NSViewController {
 
     // MARK: - Sort Indicator Updates
 
-    /// Updates column header titles to reflect current sort state.
+    /// Updates column header titles to reflect current sort and selection state.
     func updateSortIndicators() {
         guard let session = fileSession else { return }
         let sortColumns = session.viewState.sortColumns
         let isMultiSort = sortColumns.count > 1
+        let selectedColumn = session.viewState.selectedColumn
 
         for tableColumn in tableView.tableColumns {
             let columnName = tableColumn.identifier.rawValue
@@ -341,8 +345,38 @@ final class TableViewController: NSViewController {
                 }
             }
 
-            styleHeaderCell(tableColumn.headerCell, descriptor: descriptor, sortSuffix: sortSuffix)
+            let isSelected = (columnName == selectedColumn)
+            styleHeaderCell(tableColumn.headerCell, descriptor: descriptor, sortSuffix: sortSuffix, isSelected: isSelected)
         }
+    }
+
+    /// Called by AutoFitTableHeaderView when the user clicks on the sort indicator area
+    /// of a sorted column header. Triggers sort cycling without requiring the Option key.
+    func handleSortIndicatorClick(columnIndex: Int, event: NSEvent) {
+        guard let session = fileSession, session.isFullyLoaded else { return }
+        guard columnIndex >= 0, columnIndex < tableView.tableColumns.count else { return }
+
+        let columnName = tableView.tableColumns[columnIndex].identifier.rawValue
+        var sortColumns = session.viewState.sortColumns
+        let isShiftHeld = event.modifierFlags.contains(.shift)
+
+        if let existingIndex = sortColumns.firstIndex(where: { $0.column == columnName }) {
+            let current = sortColumns[existingIndex]
+            switch current.direction {
+            case .ascending:
+                sortColumns[existingIndex] = SortColumn(column: columnName, direction: .descending)
+            case .descending:
+                sortColumns.remove(at: existingIndex)
+            }
+        } else {
+            if isShiftHeld {
+                sortColumns.append(SortColumn(column: columnName, direction: .ascending))
+            } else {
+                sortColumns = [SortColumn(column: columnName, direction: .ascending)]
+            }
+        }
+
+        onSortChanged?(sortColumns)
     }
 
     // MARK: - Filter Management
@@ -1071,7 +1105,8 @@ final class TableViewController: NSViewController {
     }
 
     /// Applies bold font, type icon, and numeric right-alignment to a header cell via attributed string.
-    private func styleHeaderCell(_ headerCell: NSTableHeaderCell, descriptor: ColumnDescriptor, sortSuffix: String = "") {
+    /// When `isSelected` is true, the header cell gets a tinted background color.
+    private func styleHeaderCell(_ headerCell: NSTableHeaderCell, descriptor: ColumnDescriptor, sortSuffix: String = "", isSelected: Bool = false) {
         let isNumeric = descriptor.displayType == .integer || descriptor.displayType == .float
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.alignment = isNumeric ? .right : .left
@@ -1089,6 +1124,15 @@ final class TableViewController: NSViewController {
             .font: NSFont.boldSystemFont(ofSize: NSFont.smallSystemFontSize),
             .paragraphStyle: paragraphStyle,
         ], range: NSRange(location: 0, length: styled.length))
+
+        // Apply selection tint via background color on the attributed string
+        if isSelected {
+            styled.addAttribute(
+                .backgroundColor,
+                value: NSColor.controlAccentColor.withAlphaComponent(0.15),
+                range: NSRange(location: 0, length: styled.length)
+            )
+        }
 
         headerCell.attributedStringValue = styled
     }
@@ -1258,30 +1302,36 @@ extension TableViewController: NSTableViewDelegate {
         // Skip if file isn't fully loaded yet
         guard session.isFullyLoaded else { return }
 
-        var sortColumns = session.viewState.sortColumns
-        let isShiftHeld = NSEvent.modifierFlags.contains(.shift)
+        let modifiers = NSEvent.modifierFlags
+        let isOptionHeld = modifiers.contains(.option)
+        let isShiftHeld = modifiers.contains(.shift)
 
-        if let existingIndex = sortColumns.firstIndex(where: { $0.column == columnName }) {
-            let current = sortColumns[existingIndex]
-            switch current.direction {
-            case .ascending:
-                // Second click: switch to descending
-                sortColumns[existingIndex] = SortColumn(column: columnName, direction: .descending)
-            case .descending:
-                // Third click: remove sort
-                sortColumns.remove(at: existingIndex)
-            }
-        } else {
-            if isShiftHeld {
-                // Shift+click: add as secondary/tertiary sort key
-                sortColumns.append(SortColumn(column: columnName, direction: .ascending))
+        if isOptionHeld {
+            // Option+click (or Shift+Option+click): sort by this column
+            var sortColumns = session.viewState.sortColumns
+
+            if let existingIndex = sortColumns.firstIndex(where: { $0.column == columnName }) {
+                let current = sortColumns[existingIndex]
+                switch current.direction {
+                case .ascending:
+                    sortColumns[existingIndex] = SortColumn(column: columnName, direction: .descending)
+                case .descending:
+                    sortColumns.remove(at: existingIndex)
+                }
             } else {
-                // Regular click: replace all sorts with this column ascending
-                sortColumns = [SortColumn(column: columnName, direction: .ascending)]
+                if isShiftHeld {
+                    sortColumns.append(SortColumn(column: columnName, direction: .ascending))
+                } else {
+                    sortColumns = [SortColumn(column: columnName, direction: .ascending)]
+                }
             }
-        }
 
-        onSortChanged?(sortColumns)
+            onSortChanged?(sortColumns)
+        } else {
+            // Plain click: select this column (toggle off if already selected)
+            let newSelection = (session.viewState.selectedColumn == columnName) ? nil : columnName
+            onColumnSelected?(newSelection)
+        }
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
@@ -1601,10 +1651,14 @@ extension TableViewController: NSSplitViewDelegate {
 // MARK: - AutoFitTableHeaderView
 
 /// Custom NSTableHeaderView subclass that detects double-clicks on column border
-/// dividers to trigger auto-fit column width.
+/// dividers to trigger auto-fit column width, and routes clicks on the sort indicator
+/// area to sort instead of column select.
 private final class AutoFitTableHeaderView: NSTableHeaderView {
 
     weak var tableViewController: TableViewController?
+
+    /// Width of the clickable sort indicator area on the right side of each header cell.
+    private static let sortIndicatorClickWidth: CGFloat = 24
 
     init(tableViewController: TableViewController) {
         self.tableViewController = tableViewController
@@ -1616,13 +1670,23 @@ private final class AutoFitTableHeaderView: NSTableHeaderView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        let localPoint = convert(event.locationInWindow, from: nil)
+
         if event.clickCount == 2 {
-            let localPoint = convert(event.locationInWindow, from: nil)
             if let columnIndex = columnBorderIndex(at: localPoint) {
                 tableViewController?.autoFitColumn(at: columnIndex)
                 return
             }
         }
+
+        // Check if click is in the sort indicator area of a sorted column
+        if event.clickCount == 1, !event.modifierFlags.contains(.option) {
+            if let columnIndex = sortIndicatorColumnIndex(at: localPoint) {
+                tableViewController?.handleSortIndicatorClick(columnIndex: columnIndex, event: event)
+                return
+            }
+        }
+
         super.mouseDown(with: event)
     }
 
@@ -1638,6 +1702,30 @@ private final class AutoFitTableHeaderView: NSTableHeaderView {
             if abs(point.x - xOffset) <= borderThreshold {
                 return index
             }
+        }
+        return nil
+    }
+
+    /// Returns the column index if the click point is within the sort indicator area
+    /// (rightmost ~24pt) of a currently-sorted column. Returns nil otherwise.
+    private func sortIndicatorColumnIndex(at point: NSPoint) -> Int? {
+        guard let tableView = tableView,
+              let session = tableViewController?.fileSession else { return nil }
+        let sortColumns = session.viewState.sortColumns
+        guard !sortColumns.isEmpty else { return nil }
+
+        var xOffset: CGFloat = 0
+        for (index, column) in tableView.tableColumns.enumerated() {
+            let columnRight = xOffset + column.width
+            let indicatorLeft = columnRight - Self.sortIndicatorClickWidth
+
+            if point.x >= indicatorLeft && point.x <= columnRight {
+                let columnName = column.identifier.rawValue
+                if sortColumns.contains(where: { $0.column == columnName }) {
+                    return index
+                }
+            }
+            xOffset = columnRight + tableView.intercellSpacing.width
         }
         return nil
     }
