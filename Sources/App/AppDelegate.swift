@@ -623,7 +623,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     /// Creates a new tab with the full Group By aggregation results.
     private func openGroupBySummary(definition: GroupByDefinition, sourceSession: FileSession) {
-        guard let parentWindow = activeWindow else { return }
+        // Resolve the window that owns the source session so the summary tab
+        // attaches to the correct tab group even when a floating panel is key.
+        guard let sourceTab = tab(for: sourceSession),
+              let parentWindow = window(for: sourceTab) ?? activeWindow else { return }
 
         // Build tab title from group-by column names
         let groupNames = definition.groupByColumns.joined(separator: ", ")
