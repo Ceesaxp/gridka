@@ -95,6 +95,17 @@ final class GroupByPanelController: NSWindowController, NSWindowDelegate {
     private var aggregationsPlaceholder: NSTextField!
     private var openButton: NSButton!
 
+    // MARK: - Preview Components (US-022)
+
+    private var previewTableView: NSTableView!
+    private var previewScrollView: NSScrollView!
+    private var previewCountLabel: NSTextField!
+    private var previewSpinner: NSProgressIndicator!
+    private var previewColumnNames: [String] = []
+    private var previewRows: [[String]] = []
+    private var previewDebounceWorkItem: DispatchWorkItem?
+    private var previewGeneration: Int = 0
+
     // MARK: - Init
 
     private init(fileSession: FileSession) {
@@ -102,14 +113,14 @@ final class GroupByPanelController: NSWindowController, NSWindowDelegate {
         self.availableColumns = fileSession.columns.filter { $0.name != "_gridka_rowid" }
 
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 650, height: 480),
+            contentRect: NSRect(x: 0, y: 0, width: 650, height: 620),
             styleMask: [.titled, .closable, .resizable, .utilityWindow, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
         panel.isReleasedWhenClosed = false
         panel.title = "Group By"
-        panel.minSize = NSSize(width: 500, height: 360)
+        panel.minSize = NSSize(width: 500, height: 480)
         panel.level = .floating
         panel.isFloatingPanel = true
         panel.becomesKeyOnlyIfNeeded = true
@@ -161,6 +172,11 @@ final class GroupByPanelController: NSWindowController, NSWindowDelegate {
         // Width distribution: left 40%, right 60%
         leftPanel.widthAnchor.constraint(equalTo: mainSplit.widthAnchor, multiplier: 0.38).isActive = true
 
+        // --- Preview section (US-022) ---
+        let previewSection = makePreviewSection()
+        previewSection.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(previewSection)
+
         // --- Buttons row ---
         let cancelButton = NSButton(title: "Cancel", target: self, action: #selector(cancelClicked))
         cancelButton.translatesAutoresizingMaskIntoConstraints = false
@@ -179,9 +195,14 @@ final class GroupByPanelController: NSWindowController, NSWindowDelegate {
             mainSplit.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
             mainSplit.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 16),
 
+            previewSection.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
+            previewSection.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
+            previewSection.topAnchor.constraint(equalTo: mainSplit.bottomAnchor, constant: 12),
+            previewSection.heightAnchor.constraint(greaterThanOrEqualToConstant: 120),
+
             openButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
             openButton.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -16),
-            openButton.topAnchor.constraint(equalTo: mainSplit.bottomAnchor, constant: 12),
+            openButton.topAnchor.constraint(equalTo: previewSection.bottomAnchor, constant: 12),
 
             cancelButton.trailingAnchor.constraint(equalTo: openButton.leadingAnchor, constant: -8),
             cancelButton.centerYAnchor.constraint(equalTo: openButton.centerYAnchor),
@@ -189,6 +210,9 @@ final class GroupByPanelController: NSWindowController, NSWindowDelegate {
 
         // Sync button state with the default COUNT(*) aggregation added in init
         updateOpenButtonState()
+
+        // Trigger initial preview for the default COUNT(*) aggregation
+        schedulePreviewUpdate()
     }
 
     // MARK: - Left Panel: Available Columns
@@ -503,12 +527,14 @@ final class GroupByPanelController: NSWindowController, NSWindowDelegate {
         groupByColumns.append(columnName)
         refreshGroupByPills()
         updateOpenButtonState()
+        schedulePreviewUpdate()
     }
 
     private func removeFromGroupBy(_ columnName: String) {
         groupByColumns.removeAll { $0 == columnName }
         refreshGroupByPills()
         updateOpenButtonState()
+        schedulePreviewUpdate()
     }
 
     private func refreshGroupByPills() {
@@ -603,6 +629,7 @@ final class GroupByPanelController: NSWindowController, NSWindowDelegate {
         aggregations.append(entry)
         refreshAggregationsPills()
         updateOpenButtonState()
+        schedulePreviewUpdate()
     }
 
     private func removeFromAggregations(at index: Int) {
@@ -610,6 +637,7 @@ final class GroupByPanelController: NSWindowController, NSWindowDelegate {
         aggregations.remove(at: index)
         refreshAggregationsPills()
         updateOpenButtonState()
+        schedulePreviewUpdate()
     }
 
     /// Removes the most recently added aggregation for the given column name.
@@ -712,6 +740,7 @@ final class GroupByPanelController: NSWindowController, NSWindowDelegate {
         guard let title = sender.titleOfSelectedItem,
               let fn = AggregationFunction(rawValue: title) else { return }
         updateAggregationFunction(at: index, to: fn)
+        schedulePreviewUpdate()
     }
 
     @objc private func removeAggregationPill(_ sender: NSButton) {
@@ -723,6 +752,145 @@ final class GroupByPanelController: NSWindowController, NSWindowDelegate {
     private func updateOpenButtonState() {
         // Need at least one aggregation (groupByColumns can be empty for overall aggregation)
         openButton.isEnabled = !aggregations.isEmpty
+    }
+
+    // MARK: - Preview Section (US-022)
+
+    private func makePreviewSection() -> NSView {
+        let container = NSView()
+
+        // Title row: "PREVIEW" label + spinner + count label
+        let titleLabel = NSTextField(labelWithString: "PREVIEW")
+        titleLabel.font = NSFont.systemFont(ofSize: 10, weight: .semibold)
+        titleLabel.textColor = .tertiaryLabelColor
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(titleLabel)
+
+        previewSpinner = NSProgressIndicator()
+        previewSpinner.style = .spinning
+        previewSpinner.controlSize = .small
+        previewSpinner.isDisplayedWhenStopped = false
+        previewSpinner.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(previewSpinner)
+
+        previewCountLabel = NSTextField(labelWithString: "")
+        previewCountLabel.font = NSFont.systemFont(ofSize: 10)
+        previewCountLabel.textColor = .secondaryLabelColor
+        previewCountLabel.alignment = .right
+        previewCountLabel.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(previewCountLabel)
+
+        // Preview table
+        previewTableView = NSTableView()
+        previewTableView.style = .plain
+        previewTableView.usesAlternatingRowBackgroundColors = true
+        previewTableView.rowHeight = 20
+        previewTableView.intercellSpacing = NSSize(width: 8, height: 2)
+        previewTableView.focusRingType = .none
+        previewTableView.allowsColumnSelection = false
+        previewTableView.allowsMultipleSelection = false
+
+        previewScrollView = NSScrollView()
+        previewScrollView.documentView = previewTableView
+        previewScrollView.hasVerticalScroller = true
+        previewScrollView.hasHorizontalScroller = true
+        previewScrollView.autohidesScrollers = true
+        previewScrollView.borderType = .bezelBorder
+        previewScrollView.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(previewScrollView)
+
+        NSLayoutConstraint.activate([
+            titleLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            titleLabel.topAnchor.constraint(equalTo: container.topAnchor),
+
+            previewSpinner.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 6),
+            previewSpinner.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
+
+            previewCountLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            previewCountLabel.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
+
+            previewScrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            previewScrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            previewScrollView.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 4),
+            previewScrollView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
+
+        return container
+    }
+
+    private func schedulePreviewUpdate() {
+        previewDebounceWorkItem?.cancel()
+        previewGeneration += 1
+
+        guard !aggregations.isEmpty else {
+            previewColumnNames = []
+            previewRows = []
+            rebuildPreviewTableColumns()
+            previewTableView.reloadData()
+            previewCountLabel.stringValue = ""
+            previewSpinner.stopAnimation(nil)
+            return
+        }
+
+        previewSpinner.startAnimation(nil)
+
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.executePreviewQuery()
+        }
+        previewDebounceWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: workItem)
+    }
+
+    private func executePreviewQuery() {
+        guard let session = fileSession else { return }
+        let generation = previewGeneration
+
+        session.fetchGroupByPreview(
+            groupByColumns: groupByColumns,
+            aggregations: aggregations
+        ) { [weak self] result in
+            guard let self = self else { return }
+            guard self.previewGeneration == generation else { return }
+
+            self.previewSpinner.stopAnimation(nil)
+
+            switch result {
+            case .success(let preview):
+                self.previewColumnNames = preview.columnNames
+                self.previewRows = preview.rows
+                self.rebuildPreviewTableColumns()
+                self.previewTableView.reloadData()
+                let groupWord = preview.totalGroups == 1 ? "group" : "groups"
+                self.previewCountLabel.stringValue = "\(preview.totalGroups) \(groupWord) total"
+
+            case .failure(let error):
+                self.previewColumnNames = []
+                self.previewRows = []
+                self.rebuildPreviewTableColumns()
+                self.previewTableView.reloadData()
+                self.previewCountLabel.stringValue = "Error: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    /// Rebuilds the preview table's columns to match the current preview result.
+    private func rebuildPreviewTableColumns() {
+        // Remove existing columns
+        while let col = previewTableView.tableColumns.last {
+            previewTableView.removeTableColumn(col)
+        }
+
+        for (index, name) in previewColumnNames.enumerated() {
+            let col = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("preview_\(index)"))
+            col.title = name
+            col.minWidth = 60
+            col.width = 100
+            previewTableView.addTableColumn(col)
+        }
+
+        // Set data source/delegate after columns are configured
+        previewTableView.dataSource = self
+        previewTableView.delegate = self
     }
 
     // MARK: - NSWindowDelegate
@@ -748,14 +916,23 @@ final class GroupByPanelController: NSWindowController, NSWindowDelegate {
     }
 }
 
-// MARK: - NSTableViewDataSource & NSTableViewDelegate (Available Columns)
+// MARK: - NSTableViewDataSource & NSTableViewDelegate (Available Columns + Preview)
 
 extension GroupByPanelController: NSTableViewDataSource, NSTableViewDelegate {
     func numberOfRows(in tableView: NSTableView) -> Int {
+        if tableView === previewTableView {
+            return previewRows.count
+        }
         return availableColumns.count
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        // Preview table
+        if tableView === previewTableView {
+            return makePreviewCell(tableView: tableView, tableColumn: tableColumn, row: row)
+        }
+
+        // Available columns table
         guard row < availableColumns.count else { return nil }
         let desc = availableColumns[row]
 
@@ -803,6 +980,41 @@ extension GroupByPanelController: NSTableViewDataSource, NSTableViewDelegate {
         ])
 
         return container
+    }
+
+    // MARK: - Preview Cell
+
+    private func makePreviewCell(tableView: NSTableView, tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        guard let colID = tableColumn?.identifier.rawValue,
+              colID.hasPrefix("preview_"),
+              let colIndex = Int(colID.dropFirst("preview_".count)),
+              row < previewRows.count,
+              colIndex < previewRows[row].count else { return nil }
+
+        let value = previewRows[row][colIndex]
+        let cellID = NSUserInterfaceItemIdentifier("PreviewCell")
+
+        if let reused = tableView.makeView(withIdentifier: cellID, owner: nil) as? NSTableCellView {
+            reused.textField?.stringValue = value
+            return reused
+        }
+
+        let cell = NSTableCellView()
+        cell.identifier = cellID
+        let tf = NSTextField(labelWithString: value)
+        tf.font = NSFont.systemFont(ofSize: 11)
+        tf.lineBreakMode = .byTruncatingTail
+        tf.translatesAutoresizingMaskIntoConstraints = false
+        cell.addSubview(tf)
+        cell.textField = tf
+
+        NSLayoutConstraint.activate([
+            tf.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 4),
+            tf.trailingAnchor.constraint(lessThanOrEqualTo: cell.trailingAnchor, constant: -4),
+            tf.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+        ])
+
+        return cell
     }
 }
 

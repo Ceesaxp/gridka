@@ -1884,6 +1884,109 @@ final class FileSession {
         }
     }
 
+    // MARK: - Group By Preview (US-022)
+
+    /// Result of a Group By preview query.
+    struct GroupByPreview {
+        /// Column names in the result (group-by columns + aggregation columns).
+        let columnNames: [String]
+        /// Rows of string values (up to 5 rows, ordered by COUNT(*) DESC).
+        let rows: [[String]]
+        /// Total number of groups (not just the preview rows).
+        let totalGroups: Int
+    }
+
+    /// Fetches a preview of the Group By aggregation: top 5 groups by count descending,
+    /// plus the total group count. Runs on the serial queryQueue; completion on main thread.
+    func fetchGroupByPreview(
+        groupByColumns: [String],
+        aggregations: [AggregationEntry],
+        completion: @escaping (Result<GroupByPreview, Error>) -> Void
+    ) {
+        guard !aggregations.isEmpty else {
+            DispatchQueue.main.async {
+                completion(.failure(GridkaError.queryFailed("No aggregations specified")))
+            }
+            return
+        }
+
+        let source = queryCoordinator.buildSourceExpression(for: viewState)
+        let whereClause = queryCoordinator.buildWhereSQL(for: viewState, columns: columns)
+        let whereSQL = whereClause.isEmpty ? "" : " WHERE \(whereClause)"
+
+        // Build SELECT clause: group-by columns + aggregation expressions
+        var selectParts: [String] = []
+        for col in groupByColumns {
+            selectParts.append(QueryCoordinator.quote(col))
+        }
+        for agg in aggregations {
+            let fn = agg.function.rawValue
+            let colExpr = agg.columnName == "*" ? "*" : QueryCoordinator.quote(agg.columnName)
+            let alias = agg.columnName == "*"
+                ? "\(fn)(*)"
+                : "\(fn)(\(agg.columnName))"
+            selectParts.append("\(fn)(\(colExpr)) AS \(QueryCoordinator.quote(alias))")
+        }
+
+        let groupBySQL: String
+        if groupByColumns.isEmpty {
+            groupBySQL = ""
+        } else {
+            let groupCols = groupByColumns.map { QueryCoordinator.quote($0) }.joined(separator: ", ")
+            groupBySQL = " GROUP BY \(groupCols)"
+        }
+
+        // Preview query: top 5 groups by COUNT(*) DESC
+        let previewSQL = "SELECT \(selectParts.joined(separator: ", ")) FROM \(source)\(whereSQL)\(groupBySQL) ORDER BY COUNT(*) DESC LIMIT 5"
+
+        // Count query: total number of groups
+        let countSQL: String
+        if groupByColumns.isEmpty {
+            // No group-by means a single aggregated row
+            countSQL = "SELECT 1"
+        } else {
+            let groupCols = groupByColumns.map { QueryCoordinator.quote($0) }.joined(separator: ", ")
+            countSQL = "SELECT COUNT(*) FROM (SELECT 1 FROM \(source)\(whereSQL) GROUP BY \(groupCols))"
+        }
+
+        queryQueue.async { [weak self] in
+            guard let self = self else { return }
+            do {
+                let previewResult = try self.engine.execute(previewSQL)
+                let countResult = try self.engine.execute(countSQL)
+
+                var colNames: [String] = []
+                for i in 0..<previewResult.columnCount {
+                    colNames.append(previewResult.columnName(at: i))
+                }
+                var rows: [[String]] = []
+                for r in 0..<previewResult.rowCount {
+                    var row: [String] = []
+                    for c in 0..<previewResult.columnCount {
+                        row.append(previewResult.value(row: r, col: c).description)
+                    }
+                    rows.append(row)
+                }
+
+                let totalGroups: Int
+                if countResult.rowCount > 0, case .integer(let val) = countResult.value(row: 0, col: 0) {
+                    totalGroups = Int(val)
+                } else {
+                    totalGroups = groupByColumns.isEmpty ? 1 : rows.count
+                }
+
+                let preview = GroupByPreview(columnNames: colNames, rows: rows, totalGroups: totalGroups)
+                DispatchQueue.main.async {
+                    completion(.success(preview))
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    completion(.failure(error))
+                }
+            }
+        }
+    }
+
     // MARK: - View State Updates
 
     func updateViewState(_ newState: ViewState) {
