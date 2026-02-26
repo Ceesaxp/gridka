@@ -44,13 +44,20 @@ final class FrequencyPanelController: NSWindowController, NSWindowDelegate {
         return shared?.window?.isVisible ?? false
     }
 
+    /// Closes the panel if it belongs to the given file session.
+    /// Call when a tab/window closes to avoid orphaned panels.
+    static func closeIfOwned(by session: FileSession) {
+        guard let existing = shared, existing.fileSession === session else { return }
+        existing.window?.close()
+    }
+
     private init(column: String, fileSession: FileSession) {
         self.columnName = column
         self.fileSession = fileSession
 
         let panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 500, height: 400),
-            styleMask: [.titled, .closable, .resizable, .utilityWindow],
+            styleMask: [.titled, .closable, .resizable, .utilityWindow, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )

@@ -1522,6 +1522,10 @@ extension AppDelegate: NSWindowDelegate {
 
         // Disconnect all delegate/dataSource/target pointers immediately.
         if let tab = windowTabs[win] {
+            // Close frequency panel if it belongs to this tab's session
+            if let session = tab.fileSession {
+                FrequencyPanelController.closeIfOwned(by: session)
+            }
             tab.tableViewController?.tearDown()
             tab.fileSession?.onModifiedChanged = nil
         }
