@@ -1154,13 +1154,16 @@ final class FileSession {
     func fetchTopValues(
         columnName: String,
         totalRows: Int,
+        nullCount: Int,
         uniqueCount: Int,
         completion: @escaping (Result<TopValuesData, Error>) -> Void
     ) {
         let generation = profilerGeneration
 
-        // If all values are unique, skip the query
-        let nonNullRows = totalRows // overview stats already factored nulls in uniqueCount
+        // If all non-null values are unique, skip the query.
+        // uniqueCount is COUNT(DISTINCT col) which excludes NULLs,
+        // so compare against totalRows minus nullCount.
+        let nonNullRows = totalRows - nullCount
         if uniqueCount >= nonNullRows && nonNullRows > 0 {
             DispatchQueue.main.async {
                 guard self.profilerGeneration == generation else { return }

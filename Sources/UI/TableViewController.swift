@@ -756,10 +756,11 @@ final class TableViewController: NSViewController {
                     } else {
                         self.profilerSidebar.hideStatisticsSection()
                     }
-                    // Chain: fetch top values after overview (needs totalRows and uniqueCount)
+                    // Chain: fetch top values after overview (needs totalRows, nullCount, uniqueCount)
                     session.fetchTopValues(
                         columnName: columnName,
                         totalRows: stats.totalRows,
+                        nullCount: stats.nullCount,
                         uniqueCount: stats.uniqueCount
                     ) { [weak self] tvResult in
                         guard let self = self else { return }
