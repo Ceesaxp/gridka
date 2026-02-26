@@ -187,7 +187,7 @@
         "Compiles and runs without crashes"
       ],
       "priority": 11,
-      "passes": false,
+      "passes": true,
       "notes": "Use NSTableView inside the frequency panel. The inline percentage bar can be a custom NSTableCellView with a colored background view proportional to the percentage. For the 'Bin values' toggle, switch the query to use WIDTH_BUCKET."
     },
     {

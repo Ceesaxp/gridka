@@ -1051,3 +1051,42 @@
   - When showing frequency for a different column, the old panel is closed and a new one opened (updating title) rather than trying to mutate the existing panel in-place
   - The toolbar button state sync (`setFeatureActive`) must happen after the panel show/close action to reflect actual state (e.g., show may fail if no column is selected)
 ----
+
+## 2026-02-26 - US-011 - Frequency table with sortable columns and inline bars
+- Rewrote `Sources/UI/FrequencyPanelController.swift` to include a full NSTableView-based frequency table:
+  - Table columns: Rank (#), Value, Count (with inline bar), Percentage (%)
+  - Count column uses custom `FrequencyBarCellView` with a colored CALayer bar proportional to the max count
+  - Cell formatting: monospaced digit fonts for numeric columns, thousands separators via NumberFormatter
+  - Value column shows full value on tooltip, truncates with `.byTruncatingTail`
+- Added sortable column headers using NSSortDescriptor prototypes:
+  - Clicking column headers triggers `sortDescriptorsDidChange` delegate method
+  - Supports sorting by rank, value (case-insensitive), count, and percentage
+  - Default sort: count descending. Sort indicators (ascending/descending arrows) via `setIndicatorImage`
+  - `sortColumn` and `sortAscending` state tracked for toggling behavior
+- Added "Bin values" checkbox toggle for numeric columns:
+  - Toggle only visible when column is numeric AND has >50 distinct values
+  - When active, switches from `fetchFullFrequency` to `fetchBinnedFrequency` (WIDTH_BUCKET-based)
+  - Bin labels computed from min/max/step (e.g., "1,000 – 2,000")
+  - Toggle is hidden initially, shown/hidden after data loads based on distinct count
+- Added toolbar bar with status label ("N distinct values") and NSProgressIndicator spinner during loading
+- Extended `Sources/Engine/ProfilerQueryBuilder.swift` with two new query builders:
+  - `buildFullFrequencyQuery()` — GROUP BY with no LIMIT for complete value frequency
+  - `buildBinnedFrequencyQuery()` — WIDTH_BUCKET CTE for equal-width bins (10 buckets)
+- Extended `Sources/Model/FileSession.swift`:
+  - Added `FrequencyData` struct with `Row` type (value, count, percentage) and `totalNonNull` count
+  - Added `fetchFullFrequency(columnName:completion:)` — no generation counter (panel-level, not profiler-level)
+  - Added `fetchBinnedFrequency(columnName:completion:)` — for numeric bin mode
+  - Both methods compute percentages from total non-null count
+- Added `onValueClicked` and `onValueDoubleClicked` static callbacks on FrequencyPanelController for US-013 click-to-filter wiring
+- Added `tableRowClicked` and `tableRowDoubleClicked` action methods (not filtering yet — that's US-013)
+- Files changed: Sources/UI/FrequencyPanelController.swift, Sources/Engine/ProfilerQueryBuilder.swift, Sources/Model/FileSession.swift, plans/prd.json
+- Build succeeds, all 64 tests pass
+- **Learnings for future iterations:**
+  - NSTableView `sortDescriptorPrototype` on NSTableColumn auto-enables clickable sort headers — `sortDescriptorsDidChange` fires with the new sort descriptors
+  - `tableView.setIndicatorImage(_:in:)` draws the native sort arrow in column headers — pass `NSImage(named: "NSAscendingSortIndicator")` or `NSDescendingSortIndicator`
+  - `tableView.highlightedTableColumn` controls which column header appears highlighted (darker background)
+  - `FrequencyBarCellView` uses CALayer for the bar (not Core Graphics draw()) because `layout()` updates bar size on column resize without needing explicit `draw()` invalidation
+  - The `binToggle?.isHidden = true` initial state prevents the toggle from appearing before data loads — it's shown/hidden in `handleFrequencyResult` based on `allRows.count > 50`
+  - The frequency panel does NOT use the profiler generation counter since it's a separate panel with its own lifecycle — stale results aren't an issue because the panel is recreated for each column
+  - `NSSortDescriptor(key:ascending:)` stores the sort key and direction — the NSTableView manages toggling direction on repeated clicks
+----

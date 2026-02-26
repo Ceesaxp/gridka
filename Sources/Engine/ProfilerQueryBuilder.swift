@@ -135,6 +135,66 @@ final class ProfilerQueryBuilder {
         """
     }
 
+    // MARK: - Full Frequency Query (for Frequency Panel)
+
+    /// Builds a full frequency query returning all distinct values with counts (no LIMIT).
+    /// Used by the frequency panel (US-011) to show the complete value distribution.
+    func buildFullFrequencyQuery(
+        columnName: String,
+        viewState: ViewState,
+        columns: [ColumnDescriptor]
+    ) -> String {
+        let col = QueryCoordinator.quote(columnName)
+        let whereClause = queryCoordinator.buildWhereSQL(for: viewState, columns: columns)
+        let filterSQL = whereClause.isEmpty ? "" : " AND \(whereClause)"
+
+        return """
+        SELECT CAST(\(col) AS VARCHAR) AS val, COUNT(*) AS cnt \
+        FROM data \
+        WHERE \(col) IS NOT NULL\(filterSQL) \
+        GROUP BY \(col) \
+        ORDER BY cnt DESC
+        """
+    }
+
+    /// Builds a binned frequency query for numeric columns using WIDTH_BUCKET.
+    /// Returns bin label and count for equal-width bins.
+    func buildBinnedFrequencyQuery(
+        columnName: String,
+        viewState: ViewState,
+        columns: [ColumnDescriptor],
+        bucketCount: Int = 10
+    ) -> String {
+        let col = QueryCoordinator.quote(columnName)
+        let whereClause = queryCoordinator.buildWhereSQL(for: viewState, columns: columns)
+        let filterSQL = whereClause.isEmpty ? "" : " AND \(whereClause)"
+
+        return """
+        WITH bounds AS ( \
+        SELECT MIN(\(col)) AS col_min, MAX(\(col)) AS col_max \
+        FROM data WHERE \(col) IS NOT NULL\(filterSQL) \
+        ), \
+        bucketed AS ( \
+        SELECT \
+        CASE WHEN bounds.col_min = bounds.col_max THEN 1 \
+        ELSE LEAST(\(bucketCount), GREATEST(1, \
+        WIDTH_BUCKET(\(col)::DOUBLE, bounds.col_min::DOUBLE, bounds.col_max::DOUBLE + 1e-9, \(bucketCount)) \
+        )) END AS bucket, \
+        bounds.col_min, bounds.col_max \
+        FROM data, bounds \
+        WHERE \(col) IS NOT NULL\(filterSQL) \
+        ) \
+        SELECT \
+        bucket, \
+        COUNT(*) AS cnt, \
+        MIN(col_min) AS col_min, \
+        MIN(col_max) AS col_max \
+        FROM bucketed \
+        GROUP BY bucket \
+        ORDER BY bucket
+        """
+    }
+
     /// Builds a boolean distribution query returning true/false counts.
     func buildBooleanDistributionQuery(
         columnName: String,

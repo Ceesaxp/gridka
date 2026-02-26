@@ -1228,6 +1228,163 @@ final class FileSession {
         }
     }
 
+    // MARK: - Full Frequency Data (for Frequency Panel)
+
+    /// Complete frequency data for the frequency panel table.
+    struct FrequencyData {
+        struct Row {
+            let value: String
+            let count: Int
+            let percentage: Double
+        }
+        let rows: [Row]
+        let totalNonNull: Int
+    }
+
+    /// Fetches the complete value frequency distribution for the frequency panel (no LIMIT).
+    /// The completion handler is called on the main thread.
+    func fetchFullFrequency(
+        columnName: String,
+        completion: @escaping (Result<FrequencyData, Error>) -> Void
+    ) {
+        let sql = profilerQueryBuilder.buildFullFrequencyQuery(
+            columnName: columnName,
+            viewState: viewState,
+            columns: columns
+        )
+
+        queryQueue.async { [weak self] in
+            guard let self = self else { return }
+            do {
+                let result = try self.engine.execute(sql)
+                var rows: [FrequencyData.Row] = []
+                var totalCount = 0
+
+                // First pass: collect all rows and compute total
+                for row in 0..<result.rowCount {
+                    let count: Int
+                    if case .integer(let v) = result.value(row: row, col: 1) { count = Int(v) }
+                    else { continue }
+                    totalCount += count
+                }
+
+                // Second pass: compute percentages
+                for row in 0..<result.rowCount {
+                    let label: String
+                    switch result.value(row: row, col: 0) {
+                    case .string(let v): label = v
+                    case .integer(let v): label = String(v)
+                    case .double(let v): label = String(v)
+                    case .boolean(let v): label = v ? "true" : "false"
+                    case .date(let v): label = v
+                    case .null: label = "(null)"
+                    }
+
+                    let count: Int
+                    if case .integer(let v) = result.value(row: row, col: 1) { count = Int(v) }
+                    else { continue }
+
+                    let pct = totalCount > 0 ? Double(count) / Double(totalCount) * 100 : 0
+                    rows.append(FrequencyData.Row(value: label, count: count, percentage: pct))
+                }
+
+                let data = FrequencyData(rows: rows, totalNonNull: totalCount)
+                DispatchQueue.main.async {
+                    completion(.success(data))
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    completion(.failure(error))
+                }
+            }
+        }
+    }
+
+    /// Fetches binned frequency data for numeric columns.
+    func fetchBinnedFrequency(
+        columnName: String,
+        completion: @escaping (Result<FrequencyData, Error>) -> Void
+    ) {
+        let sql = profilerQueryBuilder.buildBinnedFrequencyQuery(
+            columnName: columnName,
+            viewState: viewState,
+            columns: columns
+        )
+
+        queryQueue.async { [weak self] in
+            guard let self = self else { return }
+            do {
+                let result = try self.engine.execute(sql)
+                var rows: [FrequencyData.Row] = []
+                var totalCount = 0
+                var globalMin: Double?
+                var globalMax: Double?
+                let bucketCount = 10
+
+                let formatter = NumberFormatter()
+                formatter.numberStyle = .decimal
+                formatter.maximumFractionDigits = 2
+
+                // First pass: compute total and extract min/max
+                for row in 0..<result.rowCount {
+                    let count: Int
+                    if case .integer(let v) = result.value(row: row, col: 1) { count = Int(v) }
+                    else { continue }
+                    totalCount += count
+
+                    if globalMin == nil {
+                        switch result.value(row: row, col: 2) {
+                        case .integer(let v): globalMin = Double(v)
+                        case .double(let v): globalMin = v
+                        default: break
+                        }
+                    }
+                    if globalMax == nil {
+                        switch result.value(row: row, col: 3) {
+                        case .integer(let v): globalMax = Double(v)
+                        case .double(let v): globalMax = v
+                        default: break
+                        }
+                    }
+                }
+
+                // Second pass: build rows with bucket labels
+                for row in 0..<result.rowCount {
+                    let bucket: Int
+                    if case .integer(let v) = result.value(row: row, col: 0) { bucket = Int(v) }
+                    else { continue }
+
+                    let count: Int
+                    if case .integer(let v) = result.value(row: row, col: 1) { count = Int(v) }
+                    else { continue }
+
+                    var label = "Bin \(bucket)"
+                    if let mn = globalMin, let mx = globalMax {
+                        let range = mx - mn
+                        let step = range / Double(bucketCount)
+                        let lo = mn + Double(bucket - 1) * step
+                        let hi = mn + Double(bucket) * step
+                        let loStr = formatter.string(from: NSNumber(value: lo)) ?? "\(lo)"
+                        let hiStr = formatter.string(from: NSNumber(value: hi)) ?? "\(hi)"
+                        label = "\(loStr) – \(hiStr)"
+                    }
+
+                    let pct = totalCount > 0 ? Double(count) / Double(totalCount) * 100 : 0
+                    rows.append(FrequencyData.Row(value: label, count: count, percentage: pct))
+                }
+
+                let data = FrequencyData(rows: rows, totalNonNull: totalCount)
+                DispatchQueue.main.async {
+                    completion(.success(data))
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    completion(.failure(error))
+                }
+            }
+        }
+    }
+
     private enum DistributionParseMode {
         case numeric
         case boolean
