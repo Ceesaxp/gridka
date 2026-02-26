@@ -9,6 +9,10 @@ final class FrequencyPanelController: NSWindowController, NSWindowDelegate {
 
     private static var shared: FrequencyPanelController?
 
+    /// Called when the panel closes (via close button, Escape, or programmatic close).
+    /// Used to sync toolbar button state.
+    static var onClose: (() -> Void)?
+
     private let columnName: String
     private weak var fileSession: FileSession?
 
@@ -109,6 +113,7 @@ final class FrequencyPanelController: NSWindowController, NSWindowDelegate {
             FrequencyPanelController.savedFrame = frame
         }
         FrequencyPanelController.shared = nil
+        FrequencyPanelController.onClose?()
     }
 
     func windowDidMove(_ notification: Notification) {

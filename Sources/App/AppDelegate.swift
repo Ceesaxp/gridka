@@ -60,6 +60,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMainMenu()
+
+        // Sync toolbar button when frequency panel closes via close button or Escape
+        FrequencyPanelController.onClose = { [weak self] in
+            self?.activeTab?.tableViewController?.analysisBar.setFeatureActive(.frequency, active: false)
+        }
+
         if windowTabs.isEmpty {
             let win = createWindow()
             let tab = TabContext()
@@ -636,6 +642,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         tvc.onValueFrequency = { [weak tvc] columnName in
             guard let tvc = tvc, let session = tvc.fileSession else { return }
             FrequencyPanelController.show(column: columnName, fileSession: session)
+            tvc.analysisBar.setFeatureActive(.frequency, active: FrequencyPanelController.isVisible)
         }
 
         tvc.onColumnSelected = { [weak self, weak tvc] columnName in
