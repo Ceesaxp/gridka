@@ -184,6 +184,9 @@ final class GroupByPanelController: NSWindowController, NSWindowDelegate {
             cancelButton.trailingAnchor.constraint(equalTo: openButton.leadingAnchor, constant: -8),
             cancelButton.centerYAnchor.constraint(equalTo: openButton.centerYAnchor),
         ])
+
+        // Sync button state with the default COUNT(*) aggregation added in init
+        updateOpenButtonState()
     }
 
     // MARK: - Left Panel: Available Columns
