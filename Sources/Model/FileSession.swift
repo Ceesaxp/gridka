@@ -1769,9 +1769,9 @@ final class FileSession {
         let sql = "SELECT \(selectParts.joined(separator: ", ")) FROM data LIMIT 5"
 
         queryQueue.async { [weak self] in
-            guard self != nil else { return }
+            guard let self = self else { return }
             do {
-                let result = try self!.engine.execute(sql)
+                let result = try self.engine.execute(sql)
                 var colNames: [String] = []
                 for i in 0..<result.columnCount {
                     colNames.append(result.columnName(at: i))

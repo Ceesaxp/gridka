@@ -107,6 +107,8 @@ final class ComputedColumnPanelController: NSWindowController, NSWindowDelegate 
     private var previewScrollView: NSScrollView!
     private var previewContainer: NSView!
     private var previewDebounceWorkItem: DispatchWorkItem?
+    /// Generation counter to discard stale preview results from earlier queries.
+    private var previewGeneration: Int = 0
     /// Column names from the last successful preview result.
     private var previewColumnNames: [String] = []
     /// Row data from the last successful preview result.
@@ -444,6 +446,7 @@ final class ComputedColumnPanelController: NSWindowController, NSWindowDelegate 
     /// Schedules a debounced preview update 300ms after the last edit.
     private func schedulePreviewUpdate() {
         previewDebounceWorkItem?.cancel()
+        previewGeneration += 1
 
         let expression = expressionTextView.string.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !expression.isEmpty else {
@@ -468,9 +471,11 @@ final class ComputedColumnPanelController: NSWindowController, NSWindowDelegate 
         guard !expression.isEmpty else { return }
 
         let columnName = columnNameField.stringValue.trimmingCharacters(in: .whitespaces)
+        let generation = previewGeneration
 
         session.fetchComputedColumnPreview(expression: expression, columnName: columnName) { [weak self] result in
             guard let self = self else { return }
+            guard self.previewGeneration == generation else { return }
             switch result {
             case .success(let preview):
                 self.hideError()
