@@ -381,13 +381,16 @@ final class TableViewController: NSViewController {
             tableView.removeTableColumn(col)
         }
 
+        // Clear computed column tracking — will be repopulated from current ViewState below
+        computedColumnNames.removeAll()
+
         for descriptor in allColumnDescriptors {
             // Skip hidden columns
             if hiddenColumns.contains(descriptor.name) { continue }
             tableView.addTableColumn(makeTableColumn(for: descriptor))
         }
 
-        // Re-add any computed columns
+        // Re-add any computed columns from current ViewState
         if let session = fileSession {
             for cc in session.viewState.computedColumns {
                 let col = makeComputedTableColumn(name: cc.name)

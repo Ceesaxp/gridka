@@ -94,8 +94,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
 
         // US-019: Add computed column to table when user confirms
-        ComputedColumnPanelController.onAddColumn = { [weak self] name, expression in
-            self?.handleComputedColumnAdded(name: name, expression: expression)
+        ComputedColumnPanelController.onAddColumn = { [weak self] name, expression, session in
+            self?.handleComputedColumnAdded(name: name, expression: expression, session: session)
         }
 
         if windowTabs.isEmpty {
@@ -1093,9 +1093,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     // MARK: - Computed Column Add/Remove (US-019)
 
-    private func handleComputedColumnAdded(name: String, expression: String) {
-        guard let tab = activeTab else { return }
-        guard let session = tab.fileSession, let tvc = tab.tableViewController else { return }
+    private func handleComputedColumnAdded(name: String, expression: String, session: FileSession) {
+        guard let tab = tab(for: session), let tvc = tab.tableViewController else { return }
 
         let cc = ComputedColumn(name: name, expression: expression)
         var newState = session.viewState

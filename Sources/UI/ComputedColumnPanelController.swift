@@ -14,8 +14,8 @@ final class ComputedColumnPanelController: NSWindowController, NSWindowDelegate 
     /// Used to sync toolbar button state.
     static var onClose: (() -> Void)?
 
-    /// Called when user clicks 'Add Column'. Parameters: (columnName, expression).
-    static var onAddColumn: ((String, String) -> Void)?
+    /// Called when user clicks 'Add Column'. Parameters: (columnName, expression, fileSession).
+    static var onAddColumn: ((String, String, FileSession) -> Void)?
 
     private weak var fileSession: FileSession?
     private let existingColumnNames: Set<String>
@@ -412,9 +412,10 @@ final class ComputedColumnPanelController: NSWindowController, NSWindowDelegate 
         let expression = expressionTextView.string.trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard validateInput(name: name, expression: expression) else { return }
+        guard let session = fileSession else { return }
 
         window?.close()
-        ComputedColumnPanelController.onAddColumn?(name, expression)
+        ComputedColumnPanelController.onAddColumn?(name, expression, session)
     }
 
     // MARK: - Validation
