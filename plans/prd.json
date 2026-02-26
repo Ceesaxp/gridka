@@ -437,7 +437,7 @@
                 "Verify in browser using dev-browser skill"
             ],
             "priority": 3,
-            "passes": false,
+            "passes": true,
             "notes": ""
         },
         {
@@ -472,12 +472,16 @@
         },
         {
             "id": "US-106",
-            "title": "Add regression tests for async invalidation and cache coherence",
-            "description": "As a developer, I want automated coverage for stale-result discard and cache invalidation so these issues do not regress.",
+            "title": "Add regression tests for async invalidation, teardown safety, and fetch-load coherence",
+            "description": "As a developer, I want automated coverage for stale-result discard, tab-close/header teardown safety, and scroll-driven fetch stability so these issues do not regress.",
             "acceptanceCriteria": [
                 "Add tests for stale fetch results after rapid filter/sort/viewState changes",
                 "Add tests that verify rowCache is not mutated by obsolete async results",
                 "Add tests for deterministic totalFilteredRows updates after state transitions",
+                "Add regression scenario for repeated tab open/close with sparklines enabled; no crash during header cell teardown/release",
+                "Add regression scenario covering close-while-updating headers: sparkline/header data is cleared safely and no callbacks touch released table/header objects",
+                "Add scroll stress scenario with rapid horizontal/vertical scrolling and concurrent page fetches; no crash in duckdb_query path",
+                "Add test coverage that in-flight fetch requests are bounded/coalesced and completions always clear fetchingPages bookkeeping",
                 "Typecheck passes",
                 "Tests pass"
             ],

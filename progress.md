@@ -1460,3 +1460,47 @@
   - The `fetchPage` completion is suppressed (not called) when generation is stale, which is safe because callers (TableViewController.requestPageFetch, AppDelegate sort/filter handlers) only use the completion to reload visible rows — stale data would cause incorrect display
   - `rowCache.invalidatePage` (singular) for cell edits doesn't need generation bumping because the in-flight fetch used the same SQL query shape; worst case it re-inserts the pre-edit value which gets corrected on next access
 ----
+
+## 2026-02-26, 20:42 - US-102 - Enforce single-thread ownership of FileSession mutable state
+- Added comprehensive thread ownership documentation block at the top of FileSession's MARK - Properties section, explaining the main-thread vs. queryQueue contract
+- Fixed cross-queue mutable access bug in `updateCell`: moved `rowCache.pageIndex(forRow:)` call from queryQueue to main thread (computed before async dispatch since it's pure math)
+- Updated documentation on `summaryGeneration` and `columnSummaries` properties to explicitly state "Main-thread only"
+- Added `dispatchPrecondition(condition: .onQueue(.main))` runtime assertions to 30 methods:
+  - Public entry points: `sniffCSV`, `loadPreview`, `loadFull`, `fetchPage`, `reload` (3 overloads), `save`, `saveAs`, `exportWithComputedColumns`
+  - Column mutations: `addColumn`, `renameColumn`, `changeColumnType`, `deleteColumn`
+  - Row mutations: `addRow`, `deleteRows`, `updateCell`
+  - Profiler: `invalidateProfilerQueries`, `fetchOverviewStats`, `fetchDescriptiveStats`, `fetchDistribution`, `fetchTopValues`
+  - Frequency: `fetchFullFrequency`, `fetchBinnedFrequency`
+  - Summaries: `invalidateColumnSummaries`, `computeColumnSummaries`
+  - View state: `updateViewState`, `requeryFilteredCount`
+  - Previews: `fetchComputedColumnPreview`, `fetchGroupByPreview`
+  - Private helpers: `invalidateRowCache`, `requeryCount`, `reloadTable`
+- Files changed: Sources/Model/FileSession.swift, plans/prd.json
+- Build succeeds, all 71 tests pass
+- **Learnings for future iterations:**
+  - `dispatchPrecondition(condition: .onQueue(.main))` is the correct Swift API for runtime queue assertions — it fires in debug builds and is stripped in release
+  - The only actual cross-queue data access bug found was in `updateCell` where `rowCache.pageIndex(forRow:)` was called on queryQueue. While the method itself is pure math (only uses a static constant), accessing a struct property through `self` from the wrong queue is technically a data race
+  - All other methods already follow the correct pattern: capture snapshots of main-thread state before dispatching to queryQueue, dispatch results back to main thread
+  - The `DispatchQueue.main.sync` calls in `computeColumnSummaries` (for checking `summaryGeneration`) are a valid pattern for reading main-thread state from queryQueue when you need a synchronous check
+----
+
+## 2026-02-26, 20:50 - US-103 - Harden SparklineHeaderCell summary lifetime
+- Refactored `Sources/UI/SparklineHeaderCell.swift`:
+  - Changed `columnSummary` from plain stored property to a property with `didSet` that snapshots the `Distribution` enum into a private `_distributionSnapshot` property
+  - `draw(withFrame:in:)` now reads only the `_distributionSnapshot` at entry — no further property access on `columnSummary` during rendering, ensuring stable data throughout the draw cycle
+  - Added `clearSummary()` method that nils both `columnSummary` and `_distributionSnapshot` — called before the owning NSTableColumn is removed from the table
+  - Added comprehensive doc comment explaining the lifetime safety contract
+- Updated `Sources/UI/TableViewController.swift`:
+  - Added `columnConfigGeneration: Int` monotonic counter, incremented in `configureColumns()` — used by `updateSparklines()` to detect stale `onSummariesComputed` callbacks
+  - In `configureColumns()`: clear all old header cells' sparkline data via `clearSummary()` BEFORE removing columns, preventing stale draws during header cell teardown/deallocation
+  - In `updateSparklines()`: capture `columnConfigGeneration` at entry and abort if it changes during iteration (columns reconfigured mid-update)
+  - In `removeComputedColumn()`: clear sparkline data before removing column
+  - In `hideColumn()`: clear sparkline data before removing column
+- Files changed: Sources/UI/SparklineHeaderCell.swift, Sources/UI/TableViewController.swift, plans/prd.json
+- Build succeeds, all 71 tests pass
+- **Learnings for future iterations:**
+  - NSTableHeaderCell's `draw(withFrame:in:)` can be called during column removal teardown — clearing data before `removeTableColumn` prevents accessing stale state
+  - The `_distributionSnapshot` pattern ensures draw() operates on a stable value-type copy, even if `columnSummary` is concurrently nilled
+  - `columnConfigGeneration` is a lightweight guard — since both `configureColumns()` and `updateSparklines()` run on main thread, the generation check detects if a reconfigure happened between the async dispatch of `onSummariesComputed` and its execution
+  - All column removal paths (configureColumns, removeComputedColumn, hideColumn) now consistently clear sparkline data before removal — this pattern should be followed for any future column removal code
+----

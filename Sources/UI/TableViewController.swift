@@ -106,6 +106,10 @@ final class TableViewController: NSViewController {
     /// Names of computed columns currently displayed.
     private var computedColumnNames: Set<String> = []
 
+    /// Monotonic counter incremented in configureColumns(). Used by updateSparklines()
+    /// to discard stale onSummariesComputed callbacks that arrive after a column reconfigure (US-103).
+    private var columnConfigGeneration: Int = 0
+
     /// Row number gutter view.
     private var rowNumberView: RowNumberView?
     /// Whether row numbers are visible.
@@ -376,6 +380,15 @@ final class TableViewController: NSViewController {
         // Remember all descriptors (excluding _gridka_rowid) for hide/show management
         allColumnDescriptors = columns.filter { $0.name != "_gridka_rowid" }
 
+        // Bump column configuration generation so in-flight sparkline updates are discarded (US-103)
+        columnConfigGeneration += 1
+
+        // Clear sparkline data on old header cells before removal to prevent stale draws
+        // during header cell teardown/deallocation (US-103).
+        for col in tableView.tableColumns {
+            (col.headerCell as? SparklineHeaderCell)?.clearSummary()
+        }
+
         // Remove existing columns
         while let col = tableView.tableColumns.last {
             tableView.removeTableColumn(col)
@@ -413,6 +426,8 @@ final class TableViewController: NSViewController {
     /// Removes a computed column from the table display.
     func removeComputedColumn(name: String) {
         if let col = tableView.tableColumns.first(where: { $0.identifier.rawValue == name }) {
+            // Clear sparkline data before removal (US-103)
+            (col.headerCell as? SparklineHeaderCell)?.clearSummary()
             tableView.removeTableColumn(col)
         }
         computedColumnNames.remove(name)
@@ -509,14 +524,23 @@ final class TableViewController: NSViewController {
 
     /// Updates sparkline data on all column header cells from cached column summaries.
     /// Called when column summaries finish computing (via onSummariesComputed callback).
+    ///
+    /// Guards against stale callbacks: captures columnConfigGeneration before iterating
+    /// and aborts if it changed (meaning configureColumns was called during iteration,
+    /// which would have cleared and replaced all header cells). (US-103)
     func updateSparklines() {
         guard let session = fileSession else { return }
+        let generation = columnConfigGeneration
         for tableColumn in tableView.tableColumns {
+            // Abort if columns were reconfigured since we started iterating
+            guard columnConfigGeneration == generation else { return }
             let columnName = tableColumn.identifier.rawValue
             if let sparklineCell = tableColumn.headerCell as? SparklineHeaderCell {
                 sparklineCell.columnSummary = session.columnSummaries[columnName]
             }
         }
+        // Final check before marking header for redisplay
+        guard columnConfigGeneration == generation else { return }
         tableView.headerView?.needsDisplay = true
     }
 
@@ -1262,7 +1286,10 @@ final class TableViewController: NSViewController {
         hiddenColumns.insert(columnName)
         let identifier = NSUserInterfaceItemIdentifier(columnName)
         if let index = tableView.tableColumns.firstIndex(where: { $0.identifier == identifier }) {
-            tableView.removeTableColumn(tableView.tableColumns[index])
+            let col = tableView.tableColumns[index]
+            // Clear sparkline data before removal (US-103)
+            (col.headerCell as? SparklineHeaderCell)?.clearSummary()
+            tableView.removeTableColumn(col)
         }
     }
 

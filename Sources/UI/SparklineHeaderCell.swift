@@ -2,11 +2,36 @@ import AppKit
 
 /// Custom NSTableHeaderCell that draws a mini sparkline visualization below the column name.
 /// Sparklines render from pre-cached ColumnSummary data — no queries on draw.
+///
+/// **Lifetime safety (US-103):**
+/// - `columnSummary` is stored as a private property with a public setter that
+///   snapshots the distribution into a local enum, so draw() only touches value-type
+///   data captured at assignment time.
+/// - `clearSummary()` nils both the summary and snapshot, called before the owning
+///   NSTableColumn is removed from the table to prevent stale draws during teardown.
+/// - `draw(withFrame:in:)` captures the snapshot once at entry; if nil, the sparkline
+///   area is skipped. No further property access occurs during drawing.
 final class SparklineHeaderCell: NSTableHeaderCell {
 
     /// The column summary data that drives sparkline rendering.
     /// Set this after column summaries are computed; nil means no sparkline shown.
-    var columnSummary: ColumnSummary?
+    /// The setter immediately snapshots the distribution for safe use during draw().
+    var columnSummary: ColumnSummary? {
+        didSet {
+            _distributionSnapshot = columnSummary?.distribution
+        }
+    }
+
+    /// Snapshot of the distribution at the time columnSummary was last set.
+    /// draw() reads only this value — never re-accesses columnSummary during rendering.
+    private var _distributionSnapshot: Distribution?
+
+    /// Clears all summary data. Call before the owning column is removed from the table
+    /// to prevent stale data from being drawn during header cell teardown/deallocation.
+    func clearSummary() {
+        columnSummary = nil
+        _distributionSnapshot = nil
+    }
 
     /// Height reserved for the sparkline area below the text.
     static let sparklineHeight: CGFloat = 16
@@ -34,8 +59,8 @@ final class SparklineHeaderCell: NSTableHeaderCell {
         )
         super.draw(withFrame: textFrame, in: controlView)
 
-        // Draw sparkline in the bottom portion.
-        guard let summary = columnSummary else { return }
+        // Snapshot distribution once at draw entry — no further property access.
+        guard let distribution = _distributionSnapshot else { return }
 
         let sparklineFrame = NSRect(
             x: cellFrame.origin.x + Self.sparklineHPadding,
@@ -48,7 +73,7 @@ final class SparklineHeaderCell: NSTableHeaderCell {
         ctx.saveGState()
         ctx.clip(to: sparklineFrame)
 
-        switch summary.distribution {
+        switch distribution {
         case .histogram(let buckets):
             drawHistogramSparkline(ctx: ctx, frame: sparklineFrame, buckets: buckets)
         case .frequency(let values):
