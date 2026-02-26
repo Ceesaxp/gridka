@@ -978,3 +978,28 @@
   - The "all unique" check (`uniqueCount >= nonNullRows`) correctly handles columns with some NULL values — uniqueCount only counts non-null distinct values
   - `make generate` works when `xcodegen generate` is blocked by the sandbox — the Makefile delegates to the same binary but goes through make
 ----
+
+## 2026-02-26 - US-008 - Batch profiler queries for performance
+- Most of US-008's acceptance criteria were already satisfied by the incremental implementation across US-004 through US-007:
+  - Overview stats (count, distinct, nulls, empty) fetched in a single query via `fetchOverviewStats` (US-004)
+  - Statistics (min, max, mean, median, stddev, q1, q3) fetched in a single query via `fetchDescriptiveStats` (US-006)
+  - Distribution and top values queries dispatched sequentially on the serial `queryQueue` (US-005, US-007)
+  - All queries include current filter/search conditions via `buildWhereSQL` (all stories)
+  - Generation counter (`profilerGeneration`) discards stale results when column selection changes (US-004)
+  - 200ms debounce on column selection changes prevents rapid-fire queries (US-004)
+- Added query execution time logging to DuckDBEngine.execute():
+  - When GRIDKA_LOG_SQL=1, each query now logs completion time in milliseconds and row count via os_log
+  - Uses CFAbsoluteTimeGetCurrent() for wall-clock timing; timing only computed when logging is enabled
+- Added NSProgressIndicator spinner alongside the "Loading..." text in ProfilerSidebarView:
+  - `loadingSpinner` (NSProgressIndicator, .spinning style, .small control size) in a horizontal NSStackView container
+  - `loadingContainer` wraps spinner + text label; managed alongside existing section show/hide logic
+  - Spinner starts on `showColumn()`/`showLoading()`, stops on `updateOverviewStats()`/`showPlaceholder()`
+- Files changed: Sources/Engine/DuckDBEngine.swift, Sources/UI/ProfilerSidebarView.swift, plans/prd.json
+- Build succeeds, all 64 tests pass
+- **Learnings for future iterations:**
+  - CFAbsoluteTimeGetCurrent() timing is only computed when `logSQL` is true, avoiding overhead in production
+  - `duckdb_row_count(&result)` can be called immediately after `duckdb_query` returns, even before checking the error state -- it returns 0 for errors
+  - NSProgressIndicator with `isDisplayedWhenStopped = false` auto-hides when `stopAnimation` is called -- no need to manually toggle `isHidden`
+  - The loading container (NSStackView) must be added to the main stack view instead of the label alone -- otherwise the spinner wouldn't be part of the layout
+  - US-008 was mostly a "glue" story verifying that the individual profiler query implementations (US-004 through US-007) work together cohesively with proper batching, loading states, and cancellation
+----

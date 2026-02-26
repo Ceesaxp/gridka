@@ -120,8 +120,15 @@ final class DuckDBEngine {
             logger.info("SQL: \(sql, privacy: .public)")
         }
 
+        let startTime = logSQL ? CFAbsoluteTimeGetCurrent() : 0
+
         var result = duckdb_result()
         let state = duckdb_query(connection!, sql, &result)
+
+        if logSQL {
+            let elapsed = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
+            logger.info("SQL completed in \(String(format: "%.1f", elapsed), privacy: .public)ms (\(duckdb_row_count(&result), privacy: .public) rows)")
+        }
 
         if state == DuckDBError {
             let errorMessage: String

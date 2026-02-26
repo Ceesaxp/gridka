@@ -142,7 +142,17 @@ final class ProfilerSidebarView: NSView {
     /// Container for the top values section.
     private var topValuesSection: NSView?
 
-    /// Loading indicator shown while profiler queries are in flight.
+    /// Spinner shown while profiler queries are in flight.
+    private let loadingSpinner: NSProgressIndicator = {
+        let spinner = NSProgressIndicator()
+        spinner.style = .spinning
+        spinner.controlSize = .small
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        spinner.isDisplayedWhenStopped = false
+        return spinner
+    }()
+
+    /// Loading indicator container (spinner + text) shown while profiler queries are in flight.
     private let loadingLabel: NSTextField = {
         let label = NSTextField(labelWithString: "Loading…")
         label.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
@@ -150,6 +160,18 @@ final class ProfilerSidebarView: NSView {
         label.translatesAutoresizingMaskIntoConstraints = false
         label.isHidden = true
         return label
+    }()
+
+    private lazy var loadingContainer: NSStackView = {
+        let stack = NSStackView()
+        stack.orientation = .horizontal
+        stack.spacing = 6
+        stack.alignment = .centerY
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.addArrangedSubview(loadingSpinner)
+        stack.addArrangedSubview(loadingLabel)
+        stack.isHidden = true
+        return stack
     }()
 
     // MARK: - Init
@@ -192,8 +214,8 @@ final class ProfilerSidebarView: NSView {
 
         stackView.addArrangedSubview(headerRow)
 
-        // Loading indicator
-        stackView.addArrangedSubview(loadingLabel)
+        // Loading indicator (spinner + text)
+        stackView.addArrangedSubview(loadingContainer)
 
         // Build overview stats section
         let section = buildOverviewSection()
@@ -252,18 +274,23 @@ final class ProfilerSidebarView: NSView {
         distributionSection?.isHidden = true
         statisticsSection?.isHidden = true
         topValuesSection?.isHidden = true
+        loadingContainer.isHidden = false
         loadingLabel.isHidden = false
+        loadingSpinner.startAnimation(nil)
     }
 
     /// Shows the placeholder text when no column is selected.
     func showPlaceholder() {
         placeholderLabel.isHidden = false
         scrollView.isHidden = true
+        loadingSpinner.stopAnimation(nil)
     }
 
-    /// Shows a loading indicator in the sidebar.
+    /// Shows a loading indicator (spinner + text) in the sidebar.
     func showLoading() {
+        loadingContainer.isHidden = false
         loadingLabel.isHidden = false
+        loadingSpinner.startAnimation(nil)
         overviewSection?.isHidden = true
         distributionSection?.isHidden = true
         statisticsSection?.isHidden = true
@@ -272,7 +299,9 @@ final class ProfilerSidebarView: NSView {
 
     /// Updates the overview stats section with fetched data.
     func updateOverviewStats(totalRows: Int, uniqueCount: Int, nullCount: Int, emptyCount: Int) {
+        loadingContainer.isHidden = true
         loadingLabel.isHidden = true
+        loadingSpinner.stopAnimation(nil)
         overviewSection?.isHidden = false
 
         let formatter = NumberFormatter()

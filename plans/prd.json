@@ -139,7 +139,7 @@
         "Compiles and runs without crashes"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "Use a generation counter pattern: increment a counter when column selection changes, and discard results whose generation doesn't match current. This prevents stale data from appearing. Log query times with os_log when GRIDKA_LOG_SQL=1."
     },
     {
