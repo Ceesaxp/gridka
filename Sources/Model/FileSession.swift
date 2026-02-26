@@ -978,14 +978,17 @@ final class FileSession {
     struct DescriptiveStats {
         let min: Double
         let max: Double
-        let mean: Double
-        let median: Double
-        let stdDev: Double
-        let q1: Double
-        let q3: Double
+        let mean: Double?
+        let median: Double?
+        let stdDev: Double?
+        let q1: Double?
+        let q3: Double?
 
-        /// Interquartile range: Q3 - Q1.
-        var iqr: Double { q3 - q1 }
+        /// Interquartile range: Q3 - Q1, or nil if either quartile is unavailable.
+        var iqr: Double? {
+            guard let q1 = q1, let q3 = q3 else { return nil }
+            return q3 - q1
+        }
     }
 
     /// Fetches descriptive statistics (min, max, mean, median, stddev, q1, q3) for a numeric column.
@@ -1025,17 +1028,26 @@ final class FileSession {
                     return
                 }
 
-                func extractDouble(col: Int) -> Double {
+                func extractDouble(col: Int) -> Double? {
                     switch result.value(row: 0, col: col) {
                     case .double(let v): return v
                     case .integer(let v): return Double(v)
-                    default: return 0
+                    default: return nil
                     }
                 }
 
+                // min and max are guaranteed non-nil by the guard above (col 0 checked for .null).
+                guard let colMin = extractDouble(col: 0), let colMax = extractDouble(col: 1) else {
+                    DispatchQueue.main.async {
+                        guard self.profilerGeneration == generation else { return }
+                        completion(.failure(GridkaError.queryFailed("All values are NULL")))
+                    }
+                    return
+                }
+
                 let stats = DescriptiveStats(
-                    min: extractDouble(col: 0),
-                    max: extractDouble(col: 1),
+                    min: colMin,
+                    max: colMax,
                     mean: extractDouble(col: 2),
                     median: extractDouble(col: 3),
                     stdDev: extractDouble(col: 4),

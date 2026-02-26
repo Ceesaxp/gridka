@@ -314,25 +314,39 @@ final class ProfilerSidebarView: NSView {
 
     /// Updates the descriptive statistics section with fetched data.
     /// Only called for numeric columns (INTEGER, FLOAT).
-    func updateDescriptiveStats(min: Double, max: Double, mean: Double, median: Double,
-                                stdDev: Double, q1: Double, q3: Double, iqr: Double,
+    func updateDescriptiveStats(min: Double, max: Double, mean: Double?, median: Double?,
+                                stdDev: Double?, q1: Double?, q3: Double?, iqr: Double?,
                                 isInteger: Bool) {
         statisticsSection?.isHidden = false
 
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        formatter.groupingSeparator = ","
-        formatter.maximumFractionDigits = isInteger ? 0 : 2
-        formatter.minimumFractionDigits = isInteger ? 0 : 2
+        // Min/Max use integer precision for integer columns since they are exact values.
+        let exactFormatter = NumberFormatter()
+        exactFormatter.numberStyle = .decimal
+        exactFormatter.groupingSeparator = ","
+        exactFormatter.maximumFractionDigits = isInteger ? 0 : 2
+        exactFormatter.minimumFractionDigits = isInteger ? 0 : 2
 
-        minValueLabel.stringValue = formatter.string(from: NSNumber(value: min)) ?? "\(min)"
-        maxValueLabel.stringValue = formatter.string(from: NSNumber(value: max)) ?? "\(max)"
-        meanValueLabel.stringValue = formatter.string(from: NSNumber(value: mean)) ?? "\(mean)"
-        medianValueLabel.stringValue = formatter.string(from: NSNumber(value: median)) ?? "\(median)"
-        stdDevValueLabel.stringValue = formatter.string(from: NSNumber(value: stdDev)) ?? "\(stdDev)"
-        q1ValueLabel.stringValue = formatter.string(from: NSNumber(value: q1)) ?? "\(q1)"
-        q3ValueLabel.stringValue = formatter.string(from: NSNumber(value: q3)) ?? "\(q3)"
-        iqrValueLabel.stringValue = formatter.string(from: NSNumber(value: iqr)) ?? "\(iqr)"
+        // Derived stats (mean, median, stdDev, quartiles, IQR) are frequently fractional
+        // even for integer input, so always show 2 decimal places.
+        let derivedFormatter = NumberFormatter()
+        derivedFormatter.numberStyle = .decimal
+        derivedFormatter.groupingSeparator = ","
+        derivedFormatter.maximumFractionDigits = 2
+        derivedFormatter.minimumFractionDigits = 2
+
+        func format(_ value: Double?, formatter: NumberFormatter) -> String {
+            guard let v = value else { return "–" }
+            return formatter.string(from: NSNumber(value: v)) ?? "\(v)"
+        }
+
+        minValueLabel.stringValue = format(min, formatter: exactFormatter)
+        maxValueLabel.stringValue = format(max, formatter: exactFormatter)
+        meanValueLabel.stringValue = format(mean, formatter: derivedFormatter)
+        medianValueLabel.stringValue = format(median, formatter: derivedFormatter)
+        stdDevValueLabel.stringValue = format(stdDev, formatter: derivedFormatter)
+        q1ValueLabel.stringValue = format(q1, formatter: derivedFormatter)
+        q3ValueLabel.stringValue = format(q3, formatter: derivedFormatter)
+        iqrValueLabel.stringValue = format(iqr, formatter: derivedFormatter)
     }
 
     /// Hides the statistics section (for non-numeric columns).
