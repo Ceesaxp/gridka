@@ -23,6 +23,28 @@ final class ProfilerQueryBuilder {
         """
     }
 
+    // MARK: - Descriptive Statistics Query
+
+    /// Builds a descriptive statistics query for numeric columns (INTEGER, BIGINT, FLOAT, DOUBLE).
+    /// Returns a single-row result with: min, max, avg, median, stddev, q1, q3.
+    func buildDescriptiveStatsQuery(columnName: String, viewState: ViewState, columns: [ColumnDescriptor]) -> String {
+        let col = QueryCoordinator.quote(columnName)
+        let whereClause = queryCoordinator.buildWhereSQL(for: viewState, columns: columns)
+        let whereSQL = whereClause.isEmpty ? "" : " WHERE \(whereClause)"
+
+        return """
+        SELECT \
+        MIN(\(col)) AS col_min, \
+        MAX(\(col)) AS col_max, \
+        AVG(\(col)) AS col_avg, \
+        MEDIAN(\(col)) AS col_median, \
+        STDDEV(\(col)) AS col_stddev, \
+        QUANTILE_CONT(\(col), 0.25) AS col_q1, \
+        QUANTILE_CONT(\(col), 0.75) AS col_q3 \
+        FROM data\(whereSQL)
+        """
+    }
+
     // MARK: - Distribution Queries
 
     /// Builds a histogram query for numeric columns using WIDTH_BUCKET.

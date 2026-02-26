@@ -920,3 +920,31 @@
   - Chaining distribution fetch after overview stats is clean because distribution needs uniqueCount to decide between full frequency vs top-10 for categorical columns
   - HistogramView tooltip implementation uses NSTrackingArea with userInfo dictionary — areas are rebuilt on each draw() to match current bar positions
 ----
+
+## 2026-02-26 - US-006 - Show descriptive statistics in profiler for numeric columns
+- Extended `Sources/Engine/ProfilerQueryBuilder.swift` with `buildDescriptiveStatsQuery()`:
+  - Generates `SELECT MIN(col), MAX(col), AVG(col), MEDIAN(col), STDDEV(col), QUANTILE_CONT(col, 0.25), QUANTILE_CONT(col, 0.75) FROM data WHERE ...`
+  - Uses existing `buildWhereSQL()` to respect current filters/search
+- Extended `Sources/Model/FileSession.swift`:
+  - Added `DescriptiveStats` struct with min, max, mean, median, stdDev, q1, q3, and computed `iqr` property (Q3 - Q1)
+  - Added `fetchDescriptiveStats(columnName:completion:)` — runs SQL on serial query queue, parses results via `extractDouble` helper, uses same generation counter pattern as overview/distribution for stale result discard
+- Extended `Sources/UI/ProfilerSidebarView.swift`:
+  - Added STATISTICS section below DISTRIBUTION with 4×2 grid: Min/Max, Mean/Median, Std Dev/Q1, Q3/IQR
+  - Grid cells reuse existing `makeStatCell(valueLabel:titleLabel:)` pattern for consistent styling
+  - `updateDescriptiveStats()` formats values with NumberFormatter: integers get no decimals, floats get 2 decimals, all use thousands separators
+  - `hideStatisticsSection()` hides the section for non-numeric columns
+  - `showColumn()` and `showLoading()` reset statistics section to hidden during loading
+- Modified `Sources/UI/TableViewController.swift`:
+  - Chained `fetchDescriptiveStats()` after overview stats success (parallel with distribution fetch)
+  - Numeric columns (integer, bigint, float, double) trigger stats fetch; non-numeric columns hide the section
+  - `isInteger` flag passed to sidebar for precision formatting
+- Files changed: Sources/Engine/ProfilerQueryBuilder.swift, Sources/Model/FileSession.swift, Sources/UI/ProfilerSidebarView.swift, Sources/UI/TableViewController.swift, plans/prd.json
+- Build succeeds, all 64 tests pass
+- **Learnings for future iterations:**
+  - DuckDB `MEDIAN()` and `QUANTILE_CONT()` are available as aggregate functions — no need for window function workarounds
+  - DuckDB `STDDEV()` returns population standard deviation — DuckDB also has `STDDEV_SAMP()` for sample, but `STDDEV()` matches the PRD requirement
+  - The `extractDouble` helper function handles both `.double` and `.integer` DuckDB return types — DuckDB may return MIN/MAX as integer for integer columns even though AVG/STDDEV return doubles
+  - Statistics section is chained after overview stats success (same debounce work item), parallel with the distribution fetch — both run on the serial queue so they execute sequentially but the UI updates arrive independently
+  - The `isInteger` flag determines NumberFormatter precision: 0 decimals for integer columns, 2 for float — matching the PRD requirement for "appropriate precision"
+  - `NumberFormatter.numberStyle = .decimal` with `groupingSeparator = ","` provides thousands separators automatically (e.g., 12,400)
+----

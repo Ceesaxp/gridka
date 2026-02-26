@@ -112,6 +112,27 @@ final class ProfilerSidebarView: NSView {
     /// Container for the distribution section.
     private var distributionSection: NSView?
 
+    /// Container for the descriptive statistics section (numeric columns only).
+    private var statisticsSection: NSView?
+
+    // Descriptive statistics labels (4x2 grid: Min, Max, Mean, Median, Std Dev, Q1, Q3, IQR)
+    private let minValueLabel = ProfilerSidebarView.makeStatValueLabel()
+    private let minTitleLabel = ProfilerSidebarView.makeStatTitleLabel("Min")
+    private let maxValueLabel = ProfilerSidebarView.makeStatValueLabel()
+    private let maxTitleLabel = ProfilerSidebarView.makeStatTitleLabel("Max")
+    private let meanValueLabel = ProfilerSidebarView.makeStatValueLabel()
+    private let meanTitleLabel = ProfilerSidebarView.makeStatTitleLabel("Mean")
+    private let medianValueLabel = ProfilerSidebarView.makeStatValueLabel()
+    private let medianTitleLabel = ProfilerSidebarView.makeStatTitleLabel("Median")
+    private let stdDevValueLabel = ProfilerSidebarView.makeStatValueLabel()
+    private let stdDevTitleLabel = ProfilerSidebarView.makeStatTitleLabel("Std Dev")
+    private let q1ValueLabel = ProfilerSidebarView.makeStatValueLabel()
+    private let q1TitleLabel = ProfilerSidebarView.makeStatTitleLabel("Q1")
+    private let q3ValueLabel = ProfilerSidebarView.makeStatValueLabel()
+    private let q3TitleLabel = ProfilerSidebarView.makeStatTitleLabel("Q3")
+    private let iqrValueLabel = ProfilerSidebarView.makeStatValueLabel()
+    private let iqrTitleLabel = ProfilerSidebarView.makeStatTitleLabel("IQR")
+
     /// Histogram bar chart for value distribution.
     private let histogramView = HistogramView()
 
@@ -178,6 +199,11 @@ final class ProfilerSidebarView: NSView {
         distributionSection = distSection
         stackView.addArrangedSubview(distSection)
 
+        // Build descriptive statistics section (numeric columns only)
+        let statsSection = buildStatisticsSection()
+        statisticsSection = statsSection
+        stackView.addArrangedSubview(statsSection)
+
         showPlaceholder()
     }
 
@@ -210,9 +236,10 @@ final class ProfilerSidebarView: NSView {
         typeBadge.textColor = .white
         typeBadge.layer?.backgroundColor = badgeColor(for: typeName).cgColor
 
-        // Reset overview stats and distribution while loading
+        // Reset overview stats, distribution, and statistics while loading
         overviewSection?.isHidden = true
         distributionSection?.isHidden = true
+        statisticsSection?.isHidden = true
         loadingLabel.isHidden = false
     }
 
@@ -227,6 +254,7 @@ final class ProfilerSidebarView: NSView {
         loadingLabel.isHidden = false
         overviewSection?.isHidden = true
         distributionSection?.isHidden = true
+        statisticsSection?.isHidden = true
     }
 
     /// Updates the overview stats section with fetched data.
@@ -284,6 +312,34 @@ final class ProfilerSidebarView: NSView {
         histogramView.trailingNote = trailingNote
     }
 
+    /// Updates the descriptive statistics section with fetched data.
+    /// Only called for numeric columns (INTEGER, FLOAT).
+    func updateDescriptiveStats(min: Double, max: Double, mean: Double, median: Double,
+                                stdDev: Double, q1: Double, q3: Double, iqr: Double,
+                                isInteger: Bool) {
+        statisticsSection?.isHidden = false
+
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.groupingSeparator = ","
+        formatter.maximumFractionDigits = isInteger ? 0 : 2
+        formatter.minimumFractionDigits = isInteger ? 0 : 2
+
+        minValueLabel.stringValue = formatter.string(from: NSNumber(value: min)) ?? "\(min)"
+        maxValueLabel.stringValue = formatter.string(from: NSNumber(value: max)) ?? "\(max)"
+        meanValueLabel.stringValue = formatter.string(from: NSNumber(value: mean)) ?? "\(mean)"
+        medianValueLabel.stringValue = formatter.string(from: NSNumber(value: median)) ?? "\(median)"
+        stdDevValueLabel.stringValue = formatter.string(from: NSNumber(value: stdDev)) ?? "\(stdDev)"
+        q1ValueLabel.stringValue = formatter.string(from: NSNumber(value: q1)) ?? "\(q1)"
+        q3ValueLabel.stringValue = formatter.string(from: NSNumber(value: q3)) ?? "\(q3)"
+        iqrValueLabel.stringValue = formatter.string(from: NSNumber(value: iqr)) ?? "\(iqr)"
+    }
+
+    /// Hides the statistics section (for non-numeric columns).
+    func hideStatisticsSection() {
+        statisticsSection?.isHidden = true
+    }
+
     // MARK: - Distribution Section Builder
 
     private func buildDistributionSection() -> NSView {
@@ -306,6 +362,73 @@ final class ProfilerSidebarView: NSView {
             histogramView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             histogramView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             histogramView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
+
+        container.isHidden = true
+        return container
+    }
+
+    // MARK: - Statistics Section Builder
+
+    private func buildStatisticsSection() -> NSView {
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+
+        let sectionTitle = NSTextField(labelWithString: "STATISTICS")
+        sectionTitle.font = NSFont.systemFont(ofSize: 10, weight: .semibold)
+        sectionTitle.textColor = .tertiaryLabelColor
+        sectionTitle.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(sectionTitle)
+
+        // 4x2 grid: Min/Max, Mean/Median, Std Dev/Q1, Q3/IQR
+        let row1Left = makeStatCell(valueLabel: minValueLabel, titleLabel: minTitleLabel)
+        let row1Right = makeStatCell(valueLabel: maxValueLabel, titleLabel: maxTitleLabel)
+        let row2Left = makeStatCell(valueLabel: meanValueLabel, titleLabel: meanTitleLabel)
+        let row2Right = makeStatCell(valueLabel: medianValueLabel, titleLabel: medianTitleLabel)
+        let row3Left = makeStatCell(valueLabel: stdDevValueLabel, titleLabel: stdDevTitleLabel)
+        let row3Right = makeStatCell(valueLabel: q1ValueLabel, titleLabel: q1TitleLabel)
+        let row4Left = makeStatCell(valueLabel: q3ValueLabel, titleLabel: q3TitleLabel)
+        let row4Right = makeStatCell(valueLabel: iqrValueLabel, titleLabel: iqrTitleLabel)
+
+        let gridRow1 = NSStackView(views: [row1Left, row1Right])
+        gridRow1.orientation = .horizontal
+        gridRow1.distribution = .fillEqually
+        gridRow1.spacing = 8
+        gridRow1.translatesAutoresizingMaskIntoConstraints = false
+
+        let gridRow2 = NSStackView(views: [row2Left, row2Right])
+        gridRow2.orientation = .horizontal
+        gridRow2.distribution = .fillEqually
+        gridRow2.spacing = 8
+        gridRow2.translatesAutoresizingMaskIntoConstraints = false
+
+        let gridRow3 = NSStackView(views: [row3Left, row3Right])
+        gridRow3.orientation = .horizontal
+        gridRow3.distribution = .fillEqually
+        gridRow3.spacing = 8
+        gridRow3.translatesAutoresizingMaskIntoConstraints = false
+
+        let gridRow4 = NSStackView(views: [row4Left, row4Right])
+        gridRow4.orientation = .horizontal
+        gridRow4.distribution = .fillEqually
+        gridRow4.spacing = 8
+        gridRow4.translatesAutoresizingMaskIntoConstraints = false
+
+        let grid = NSStackView(views: [gridRow1, gridRow2, gridRow3, gridRow4])
+        grid.orientation = .vertical
+        grid.spacing = 8
+        grid.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(grid)
+
+        NSLayoutConstraint.activate([
+            sectionTitle.topAnchor.constraint(equalTo: container.topAnchor),
+            sectionTitle.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            sectionTitle.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor),
+
+            grid.topAnchor.constraint(equalTo: sectionTitle.bottomAnchor, constant: 8),
+            grid.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            grid.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            grid.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
 
         container.isHidden = true

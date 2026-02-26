@@ -719,6 +719,25 @@ final class TableViewController: NSViewController {
                             )
                         }
                     }
+                    // Chain: fetch descriptive statistics for numeric columns only
+                    let isNumeric = columnType == .integer || columnType == .bigint ||
+                                    columnType == .float || columnType == .double
+                    if isNumeric {
+                        let isInt = columnType == .integer || columnType == .bigint
+                        session.fetchDescriptiveStats(columnName: columnName) { [weak self] statsResult in
+                            guard let self = self else { return }
+                            if case .success(let ds) = statsResult {
+                                self.profilerSidebar.updateDescriptiveStats(
+                                    min: ds.min, max: ds.max,
+                                    mean: ds.mean, median: ds.median,
+                                    stdDev: ds.stdDev, q1: ds.q1, q3: ds.q3, iqr: ds.iqr,
+                                    isInteger: isInt
+                                )
+                            }
+                        }
+                    } else {
+                        self.profilerSidebar.hideStatisticsSection()
+                    }
                 case .failure:
                     // Query failed — keep loading state (may have been cancelled)
                     break

@@ -104,7 +104,7 @@
         "Compiles and runs without crashes"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "This extends the profiler sidebar with a Statistics section below Distribution. Use NumberFormatter for locale-aware formatting. IQR = Q3 - Q1 (computed in Swift from the query results)."
     },
     {

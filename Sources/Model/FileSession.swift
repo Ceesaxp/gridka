@@ -974,6 +974,77 @@ final class FileSession {
         }
     }
 
+    /// Descriptive statistics for numeric columns, displayed in the profiler sidebar.
+    struct DescriptiveStats {
+        let min: Double
+        let max: Double
+        let mean: Double
+        let median: Double
+        let stdDev: Double
+        let q1: Double
+        let q3: Double
+
+        /// Interquartile range: Q3 - Q1.
+        var iqr: Double { q3 - q1 }
+    }
+
+    /// Fetches descriptive statistics (min, max, mean, median, stddev, q1, q3) for a numeric column.
+    /// The completion handler is called on the main thread.
+    /// If a new column is selected or filters change before results arrive, stale results are discarded.
+    /// Must be called from the main thread (generation counter is main-thread-only).
+    func fetchDescriptiveStats(columnName: String, completion: @escaping (Result<DescriptiveStats, Error>) -> Void) {
+        let generation = profilerGeneration
+
+        let sql = profilerQueryBuilder.buildDescriptiveStatsQuery(
+            columnName: columnName,
+            viewState: viewState,
+            columns: columns
+        )
+
+        queryQueue.async { [weak self] in
+            guard let self = self else { return }
+            do {
+                let result = try self.engine.execute(sql)
+
+                guard result.rowCount > 0 else {
+                    DispatchQueue.main.async {
+                        guard self.profilerGeneration == generation else { return }
+                        completion(.failure(GridkaError.queryFailed("No descriptive stats rows returned")))
+                    }
+                    return
+                }
+
+                func extractDouble(col: Int) -> Double {
+                    switch result.value(row: 0, col: col) {
+                    case .double(let v): return v
+                    case .integer(let v): return Double(v)
+                    default: return 0
+                    }
+                }
+
+                let stats = DescriptiveStats(
+                    min: extractDouble(col: 0),
+                    max: extractDouble(col: 1),
+                    mean: extractDouble(col: 2),
+                    median: extractDouble(col: 3),
+                    stdDev: extractDouble(col: 4),
+                    q1: extractDouble(col: 5),
+                    q3: extractDouble(col: 6)
+                )
+
+                DispatchQueue.main.async {
+                    guard self.profilerGeneration == generation else { return }
+                    completion(.success(stats))
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    guard self.profilerGeneration == generation else { return }
+                    completion(.failure(error))
+                }
+            }
+        }
+    }
+
     /// Distribution data for the profiler histogram.
     struct DistributionData {
         struct Bar {
