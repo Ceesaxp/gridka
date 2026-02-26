@@ -85,6 +85,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             FrequencyPanelController.closeIfOpen()
         }
 
+        // US-017: Sync toolbar button when computed column panel closes
+        ComputedColumnPanelController.onClose = { [weak self] in
+            guard let self = self else { return }
+            for tab in self.windowTabs.values {
+                tab.tableViewController?.analysisBar.setFeatureActive(.computedColumn, active: false)
+            }
+        }
+
         if windowTabs.isEmpty {
             let win = createWindow()
             let tab = TabContext()
@@ -220,6 +228,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         let deleteColumnItem = NSMenuItem(title: "Delete Column", action: #selector(deleteColumnAction(_:)), keyEquivalent: "")
         deleteColumnItem.target = self
         editMenu.addItem(deleteColumnItem)
+
+        let computedColumnItem = NSMenuItem(title: "Add Computed Column…", action: #selector(addComputedColumnAction(_:)), keyEquivalent: "f")
+        computedColumnItem.keyEquivalentModifierMask = [.command, .option]
+        computedColumnItem.target = self
+        editMenu.addItem(computedColumnItem)
 
         editMenu.addItem(NSMenuItem.separator())
 
@@ -1057,6 +1070,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         tvc.presentAsSheet(sheetVC)
     }
 
+    // MARK: - Add Computed Column (US-017)
+
+    @objc private func addComputedColumnAction(_ sender: Any?) {
+        guard let tab = activeTab else { return }
+        guard let session = tab.fileSession, session.isFullyLoaded else { return }
+        guard let tvc = tab.tableViewController else { return }
+
+        ComputedColumnPanelController.show(fileSession: session)
+        tvc.analysisBar.setFeatureActive(.computedColumn, active: true)
+    }
+
     // MARK: - Rename Column (from Edit menu)
 
     @objc private func renameColumnAction(_ sender: Any?) {
@@ -1356,9 +1380,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 FrequencyPanelController.closeIfOpen()
             }
             tvc.analysisBar.setFeatureActive(.frequency, active: FrequencyPanelController.isVisible)
-        case .groupBy, .computedColumn:
-            // Placeholder: these features are implemented in later stories.
+        case .groupBy:
+            // Placeholder: implemented in later stories.
             break
+        case .computedColumn:
+            if isActive {
+                guard let session = tab.fileSession else { return }
+                ComputedColumnPanelController.show(fileSession: session)
+            } else {
+                ComputedColumnPanelController.closeIfOpen()
+            }
+            tvc.analysisBar.setFeatureActive(.computedColumn, active: ComputedColumnPanelController.isVisible)
         }
     }
 
@@ -1436,6 +1468,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             return session?.isFullyLoaded ?? false
         }
         if menuItem.action == #selector(addColumnAction(_:)) {
+            return session?.isFullyLoaded ?? false
+        }
+        if menuItem.action == #selector(addComputedColumnAction(_:)) {
             return session?.isFullyLoaded ?? false
         }
         if menuItem.action == #selector(renameColumnAction(_:)) {
@@ -1597,9 +1632,10 @@ extension AppDelegate: NSWindowDelegate {
 
         // Disconnect all delegate/dataSource/target pointers immediately.
         if let tab = windowTabs[win] {
-            // Close frequency panel if it belongs to this tab's session
+            // Close floating panels if they belong to this tab's session
             if let session = tab.fileSession {
                 FrequencyPanelController.closeIfOwned(by: session)
+                ComputedColumnPanelController.closeIfOwned(by: session)
             }
             tab.tableViewController?.tearDown()
             tab.fileSession?.onModifiedChanged = nil

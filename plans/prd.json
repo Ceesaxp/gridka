@@ -285,7 +285,7 @@
         "Compiles and runs without crashes"
       ],
       "priority": 17,
-      "passes": false,
+      "passes": true,
       "notes": "Use NSPanel with .titled and .closable style. The expression text area should be an NSTextView with monospace font (NSFont.monospacedSystemFont). Function chips can be NSButton instances in a flow layout (NSStackView wrapping). Insert templates like 'ROUND(, 2)' with cursor positioned inside."
     },
     {

@@ -1225,3 +1225,34 @@
   - `SparklineHeaderCell.sparklineHeight` and `totalHeaderHeight` are already `static let` properties, making them accessible from AutoFitTableHeaderView for hit-testing
   - The `onSparklineClicked` callback uses the same weak-self + tab-lookup pattern as `onColumnSelected` and other callbacks wired in `showTableView`
 ----
+
+## 2026-02-26 - US-017 - Computed column dialog with expression editor
+- Created Sources/UI/ComputedColumnPanelController.swift — floating NSPanel (utility window, non-activating) for defining computed columns with DuckDB SQL expressions
+- Panel UI contains:
+  - Column Name text field with placeholder "computed_column"
+  - Multi-line expression text area (NSTextView with monospace font) wrapped in NSScrollView with bezel border
+  - 14 function hint chips in flow layout (ROUND, UPPER, LOWER, LENGTH, YEAR, MONTH, CASE...END, CONCAT, COALESCE, CAST, REGEXP_EXTRACT, TRIM, REPLACE, SUBSTR)
+  - Error label (red text, hidden by default) for inline validation
+  - Cancel (Escape) and Add Column (Enter) buttons; Add Column disabled until both fields non-empty
+- Clicking a function hint chip inserts the template at cursor position in expression editor and positions cursor inside the first parentheses
+- Panel follows the FrequencyPanelController singleton pattern: static shared instance, show/closeIfOpen/isVisible/closeIfOwned(by:)
+- Session frame persistence (position remembered within session, not across launches)
+- Inline validation: duplicate column name shows error, empty fields disable Add Column button
+- `isReleasedWhenClosed = false` set on NSPanel (critical ARC safety — see MEMORY.md)
+- Wired three trigger points:
+  1. Toolbar button: AnalysisToolbarView .computedColumn toggle -> handleAnalysisFeatureToggled -> ComputedColumnPanelController.show()
+  2. Edit menu: "Add Computed Column..." with Opt+Cmd+F keyboard shortcut -> addComputedColumnAction
+  3. Panel close: onClose callback syncs toolbar button state across all tabs
+- Added menu validation: "Add Computed Column..." enabled only when session is fully loaded
+- Added tab close cleanup: ComputedColumnPanelController.closeIfOwned(by:) called alongside FrequencyPanelController cleanup
+- Manually added ComputedColumnPanelController.swift to Gridka.xcodeproj/project.pbxproj (PBXBuildFile, PBXFileReference, UI group, Sources build phase)
+- Files changed: Sources/UI/ComputedColumnPanelController.swift (new), Sources/App/AppDelegate.swift, Gridka.xcodeproj/project.pbxproj, plans/prd.json
+- Build succeeds, all 64 tests pass
+- **Learnings for future iterations:**
+  - NSTextView in an NSScrollView needs `autoresizingMask = [.width]`, `isVerticallyResizable = true`, and `textContainer?.widthTracksTextView = true` for proper text wrapping and vertical expansion
+  - NSTextView.insertText(_:replacementRange:) inserts at the selected range; use setSelectedRange to position cursor after insertion
+  - The .inline bezel style for NSButton creates compact chip-like buttons suitable for tag/chip UIs
+  - Function hint chips use a manual flow layout approximation with multiple horizontal NSStackViews inside a vertical NSStackView — true NSCollectionView would be overkill for ~14 fixed items
+  - The AnalysisToolbarView already had `.computedColumn` as an enum case with the "function" SF Symbol — only the handler in AppDelegate needed implementation
+  - For NSPanel floating utility windows, `becomesKeyOnlyIfNeeded = true` allows the main window to remain key when the panel doesn't need keyboard input, but the expression text view still receives focus when clicked
+----
