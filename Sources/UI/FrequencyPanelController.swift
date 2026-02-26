@@ -120,6 +120,8 @@ final class FrequencyPanelController: NSWindowController, NSWindowDelegate {
     private var isBinned: Bool = false
     /// Cached max count across all rows (computed once per data load, not per cell render).
     private var cachedMaxCount: Int = 1
+    /// Generation counter: incremented on each load request. Stale responses are discarded.
+    private var loadGeneration: Int = 0
 
     private struct FrequencyRow {
         let rank: Int
@@ -264,21 +266,32 @@ final class FrequencyPanelController: NSWindowController, NSWindowDelegate {
     private func loadFrequencyData() {
         guard let session = fileSession else { return }
 
+        loadGeneration += 1
+        let generation = loadGeneration
+        let requestedBinned = isBinned
+
         statusLabel.stringValue = "Loading…"
         spinner.startAnimation(nil)
 
-        if isBinned {
+        if requestedBinned {
             session.fetchBinnedFrequency(columnName: columnName) { [weak self] result in
-                self?.handleFrequencyResult(result)
+                self?.handleFrequencyResult(result, generation: generation, wasBinned: requestedBinned)
             }
         } else {
             session.fetchFullFrequency(columnName: columnName) { [weak self] result in
-                self?.handleFrequencyResult(result)
+                self?.handleFrequencyResult(result, generation: generation, wasBinned: requestedBinned)
             }
         }
     }
 
-    private func handleFrequencyResult(_ result: Result<FileSession.FrequencyData, Error>) {
+    private func handleFrequencyResult(
+        _ result: Result<FileSession.FrequencyData, Error>,
+        generation: Int,
+        wasBinned: Bool
+    ) {
+        // Discard stale responses from a previous load request
+        guard generation == loadGeneration else { return }
+
         spinner.stopAnimation(nil)
 
         switch result {
@@ -288,10 +301,10 @@ final class FrequencyPanelController: NSWindowController, NSWindowDelegate {
             }
             cachedMaxCount = allRows.map(\.count).max() ?? 1
             sortAndReload()
-            let groupLabel = isBinned ? "bins" : "distinct values"
+            let groupLabel = wasBinned ? "bins" : "distinct values"
             statusLabel.stringValue = "\(allRows.count) \(groupLabel)"
             // Show bin toggle only for numeric columns with >50 distinct values
-            if isNumericColumn && !isBinned {
+            if isNumericColumn && !wasBinned {
                 binToggle?.isHidden = allRows.count <= 50
             }
         case .failure(let error):
