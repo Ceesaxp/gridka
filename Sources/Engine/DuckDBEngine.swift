@@ -125,12 +125,11 @@ final class DuckDBEngine {
         var result = duckdb_result()
         let state = duckdb_query(connection!, sql, &result)
 
-        if logSQL {
-            let elapsed = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
-            logger.info("SQL completed in \(String(format: "%.1f", elapsed), privacy: .public)ms (\(duckdb_row_count(&result), privacy: .public) rows)")
-        }
-
         if state == DuckDBError {
+            if logSQL {
+                let elapsed = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
+                logger.error("SQL failed in \(String(format: "%.1f", elapsed), privacy: .public)ms")
+            }
             let errorMessage: String
             if let cError = duckdb_result_error(&result) {
                 errorMessage = String(cString: cError)
@@ -139,6 +138,11 @@ final class DuckDBEngine {
             }
             duckdb_destroy_result(&result)
             throw GridkaError.queryFailed(errorMessage)
+        }
+
+        if logSQL {
+            let elapsed = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
+            logger.info("SQL completed in \(String(format: "%.1f", elapsed), privacy: .public)ms (\(duckdb_row_count(&result), privacy: .public) rows)")
         }
 
         return DuckDBResult(result)
