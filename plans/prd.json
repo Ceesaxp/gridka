@@ -357,7 +357,7 @@
         "Compiles and runs without crashes"
       ],
       "priority": 21,
-      "passes": false,
+      "passes": true,
       "notes": "The Available Columns list is an NSTableView or NSOutlineView. The Group By and Aggregations zones use NSStackView with pill-style NSViews. The function dropdown on aggregation pills is an NSPopUpButton. Use click-to-add (not drag-and-drop) for simplicity."
     },
     {

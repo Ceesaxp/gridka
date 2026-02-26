@@ -98,6 +98,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             self?.handleComputedColumnAdded(name: name, expression: expression, session: session)
         }
 
+        // US-021: Sync toolbar button when Group By panel closes
+        GroupByPanelController.onClose = { [weak self] in
+            guard let self = self else { return }
+            for tab in self.windowTabs.values {
+                tab.tableViewController?.analysisBar.setFeatureActive(.groupBy, active: false)
+            }
+        }
+
+        // US-021: Open as New Tab callback (placeholder — implemented in US-023)
+        GroupByPanelController.onOpenAsNewTab = { [weak self] definition, session in
+            NSLog("Group By: Open as New Tab requested with \(definition.groupByColumns.count) group columns and \(definition.aggregations.count) aggregations")
+        }
+
         if windowTabs.isEmpty {
             let win = createWindow()
             let tab = TabContext()
@@ -238,6 +251,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         computedColumnItem.keyEquivalentModifierMask = [.command, .option]
         computedColumnItem.target = self
         editMenu.addItem(computedColumnItem)
+
+        let groupByItem = NSMenuItem(title: "Group By…", action: #selector(groupByAction(_:)), keyEquivalent: "g")
+        groupByItem.keyEquivalentModifierMask = [.command, .option]
+        groupByItem.target = self
+        editMenu.addItem(groupByItem)
 
         editMenu.addItem(NSMenuItem.separator())
 
@@ -1091,6 +1109,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         tvc.analysisBar.setFeatureActive(.computedColumn, active: true)
     }
 
+    // MARK: - Group By (US-021)
+
+    @objc private func groupByAction(_ sender: Any?) {
+        guard let tab = activeTab else { return }
+        guard let session = tab.fileSession, session.isFullyLoaded else { return }
+        guard let tvc = tab.tableViewController else { return }
+
+        GroupByPanelController.show(fileSession: session)
+        tvc.analysisBar.setFeatureActive(.groupBy, active: true)
+    }
+
     // MARK: - Computed Column Add/Remove (US-019)
 
     private func handleComputedColumnAdded(name: String, expression: String, session: FileSession) {
@@ -1464,8 +1493,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             }
             tvc.analysisBar.setFeatureActive(.frequency, active: FrequencyPanelController.isVisible)
         case .groupBy:
-            // Placeholder: implemented in later stories.
-            break
+            if isActive {
+                guard let session = tab.fileSession else { return }
+                GroupByPanelController.show(fileSession: session)
+            } else {
+                GroupByPanelController.closeIfOpen()
+            }
+            tvc.analysisBar.setFeatureActive(.groupBy, active: GroupByPanelController.isVisible)
         case .computedColumn:
             if isActive {
                 guard let session = tab.fileSession else { return }
@@ -1554,6 +1588,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             return session?.isFullyLoaded ?? false
         }
         if menuItem.action == #selector(addComputedColumnAction(_:)) {
+            return session?.isFullyLoaded ?? false
+        }
+        if menuItem.action == #selector(groupByAction(_:)) {
             return session?.isFullyLoaded ?? false
         }
         if menuItem.action == #selector(renameColumnAction(_:)) {
@@ -1813,6 +1850,7 @@ extension AppDelegate: NSWindowDelegate {
             if let session = tab.fileSession {
                 FrequencyPanelController.closeIfOwned(by: session)
                 ComputedColumnPanelController.closeIfOwned(by: session)
+                GroupByPanelController.closeIfOwned(by: session)
             }
             tab.tableViewController?.tearDown()
             tab.fileSession?.onModifiedChanged = nil
