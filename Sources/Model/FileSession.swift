@@ -1758,6 +1758,16 @@ final class FileSession {
         columnName: String,
         completion: @escaping (Result<ComputedColumnPreview, Error>) -> Void
     ) {
+        // Reject semicolons — a valid SQL expression never contains one.
+        // This prevents multi-statement injection (e.g. "1); COMMIT; DELETE FROM data; --")
+        // that could escape the read-only transaction below.
+        if expression.contains(";") {
+            DispatchQueue.main.async {
+                completion(.failure(GridkaError.invalidExpression("Expression must not contain semicolons")))
+            }
+            return
+        }
+
         // Pick up to 3 context columns (skip _gridka_rowid)
         let contextCols = columns
             .filter { $0.name != "_gridka_rowid" }
