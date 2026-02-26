@@ -83,6 +83,8 @@ final class GroupByPanelController: NSWindowController, NSWindowDelegate {
     private var groupByColumns: [String] = []
     /// Aggregation entries (column + function) in the Aggregations zone.
     private var aggregations: [AggregationEntry] = []
+    /// Tracks a column freshly added by single-click, so double-click can undo only that.
+    private var pendingSingleClickAdd: (column: String, wasGroupBy: Bool)?
 
     // MARK: - UI Components
 
@@ -438,11 +440,21 @@ final class GroupByPanelController: NSWindowController, NSWindowDelegate {
         guard row >= 0, row < availableColumns.count else { return }
         let desc = availableColumns[row]
 
+        pendingSingleClickAdd = nil
+
         // Default action: categorical → Group By, numeric → Aggregations
         if isDefaultGroupByColumn(desc) {
+            let countBefore = groupByColumns.count
             addToGroupBy(desc.name)
+            if groupByColumns.count > countBefore {
+                pendingSingleClickAdd = (desc.name, true)
+            }
         } else {
+            let countBefore = aggregations.count
             addToAggregations(desc.name)
+            if aggregations.count > countBefore {
+                pendingSingleClickAdd = (desc.name, false)
+            }
         }
     }
 
@@ -451,13 +463,21 @@ final class GroupByPanelController: NSWindowController, NSWindowDelegate {
         guard row >= 0, row < availableColumns.count else { return }
         let desc = availableColumns[row]
 
-        // Undo the single-click addition (if it fired before clickCount was 2),
-        // then add to the alternate zone.
+        // Only undo the single-click addition if it actually added something new.
+        // Pre-existing entries (added earlier by the user) are preserved.
+        if let pending = pendingSingleClickAdd, pending.column == desc.name {
+            if pending.wasGroupBy {
+                removeFromGroupBy(desc.name)
+            } else {
+                removeFromAggregations(columnName: desc.name)
+            }
+            pendingSingleClickAdd = nil
+        }
+
+        // Add to alternate zone
         if isDefaultGroupByColumn(desc) {
-            removeFromGroupBy(desc.name)
             addToAggregations(desc.name)
         } else {
-            removeFromAggregations(columnName: desc.name)
             addToGroupBy(desc.name)
         }
     }
