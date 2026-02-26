@@ -121,7 +121,7 @@
         "Compiles and runs without crashes"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "The click-to-filter should use the existing filter infrastructure (add a ColumnFilter to ViewState.filters). The 'Show full frequency' link can be a placeholder button initially — it will become active when US-010 is implemented."
     },
     {

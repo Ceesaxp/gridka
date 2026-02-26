@@ -111,6 +111,30 @@ final class ProfilerQueryBuilder {
         """
     }
 
+    // MARK: - Top Values Query
+
+    /// Builds a query to fetch the top N most frequent values for any column type.
+    /// Returns rows with: val (VARCHAR), cnt (BIGINT).
+    func buildTopValuesQuery(
+        columnName: String,
+        viewState: ViewState,
+        columns: [ColumnDescriptor],
+        limit: Int = 10
+    ) -> String {
+        let col = QueryCoordinator.quote(columnName)
+        let whereClause = queryCoordinator.buildWhereSQL(for: viewState, columns: columns)
+        let filterSQL = whereClause.isEmpty ? "" : " AND \(whereClause)"
+
+        return """
+        SELECT CAST(\(col) AS VARCHAR) AS val, COUNT(*) AS cnt \
+        FROM data \
+        WHERE \(col) IS NOT NULL\(filterSQL) \
+        GROUP BY \(col) \
+        ORDER BY cnt DESC \
+        LIMIT \(limit)
+        """
+    }
+
     /// Builds a boolean distribution query returning true/false counts.
     func buildBooleanDistributionQuery(
         columnName: String,

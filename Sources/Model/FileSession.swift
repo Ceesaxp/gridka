@@ -1135,6 +1135,85 @@ final class FileSession {
         }
     }
 
+    // MARK: - Top Values
+
+    /// Data for the top values section of the profiler sidebar.
+    struct TopValuesData {
+        struct ValueRow {
+            let value: String
+            let count: Int
+            let percentage: Double
+        }
+        let rows: [ValueRow]
+        let isAllUnique: Bool
+        let uniqueCount: Int
+    }
+
+    /// Fetches the top 10 most frequent values for a column.
+    /// The completion handler is called on the main thread.
+    func fetchTopValues(
+        columnName: String,
+        totalRows: Int,
+        uniqueCount: Int,
+        completion: @escaping (Result<TopValuesData, Error>) -> Void
+    ) {
+        let generation = profilerGeneration
+
+        // If all values are unique, skip the query
+        let nonNullRows = totalRows // overview stats already factored nulls in uniqueCount
+        if uniqueCount >= nonNullRows && nonNullRows > 0 {
+            DispatchQueue.main.async {
+                guard self.profilerGeneration == generation else { return }
+                completion(.success(TopValuesData(rows: [], isAllUnique: true, uniqueCount: uniqueCount)))
+            }
+            return
+        }
+
+        let sql = profilerQueryBuilder.buildTopValuesQuery(
+            columnName: columnName,
+            viewState: viewState,
+            columns: columns
+        )
+
+        queryQueue.async { [weak self] in
+            guard let self = self else { return }
+            do {
+                let result = try self.engine.execute(sql)
+                var rows: [TopValuesData.ValueRow] = []
+
+                for row in 0..<result.rowCount {
+                    let label: String
+                    switch result.value(row: row, col: 0) {
+                    case .string(let v): label = v
+                    case .integer(let v): label = String(v)
+                    case .double(let v): label = String(v)
+                    case .boolean(let v): label = v ? "true" : "false"
+                    case .date(let v): label = v
+                    case .null: label = "(null)"
+                    }
+
+                    let count: Int
+                    if case .integer(let v) = result.value(row: row, col: 1) { count = Int(v) }
+                    else { continue }
+
+                    let pct = totalRows > 0 ? Double(count) / Double(totalRows) * 100 : 0
+                    rows.append(TopValuesData.ValueRow(value: label, count: count, percentage: pct))
+                }
+
+                let data = TopValuesData(rows: rows, isAllUnique: false, uniqueCount: uniqueCount)
+                DispatchQueue.main.async {
+                    guard self.profilerGeneration == generation else { return }
+                    completion(.success(data))
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    guard self.profilerGeneration == generation else { return }
+                    completion(.failure(error))
+                }
+            }
+        }
+    }
+
     private enum DistributionParseMode {
         case numeric
         case boolean

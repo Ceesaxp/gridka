@@ -203,6 +203,24 @@ final class TableViewController: NSViewController {
         detailPane = DetailPaneView()
         profilerSidebar = ProfilerSidebarView()
 
+        // Wire top values click-to-filter: clicking a value adds an equals filter
+        profilerSidebar.topValuesView.onValueClicked = { [weak self] value in
+            guard let self = self, let session = self.fileSession,
+                  let selectedCol = session.viewState.selectedColumn else { return }
+            // Replace any existing filter for this column with the new equals filter
+            var filters = session.viewState.filters
+            filters.removeAll { $0.column == selectedCol }
+            filters.append(ColumnFilter(column: selectedCol, operator: .equals, value: .string(value)))
+            self.onFiltersChanged?(filters)
+        }
+
+        // Wire "Show full frequency" link (placeholder — logs column name until US-010)
+        profilerSidebar.topValuesView.onShowFullFrequency = { [weak self] in
+            guard let self = self, let session = self.fileSession,
+                  let selectedCol = session.viewState.selectedColumn else { return }
+            NSLog("Show full frequency for column: \(selectedCol)")
+        }
+
         // Inner split view: top = scroll view with table, bottom = detail pane
         splitView = NSSplitView()
         splitView.isVertical = false
@@ -737,6 +755,24 @@ final class TableViewController: NSViewController {
                         }
                     } else {
                         self.profilerSidebar.hideStatisticsSection()
+                    }
+                    // Chain: fetch top values after overview (needs totalRows and uniqueCount)
+                    session.fetchTopValues(
+                        columnName: columnName,
+                        totalRows: stats.totalRows,
+                        uniqueCount: stats.uniqueCount
+                    ) { [weak self] tvResult in
+                        guard let self = self else { return }
+                        if case .success(let data) = tvResult {
+                            if data.isAllUnique {
+                                self.profilerSidebar.showAllUniqueMessage(uniqueCount: data.uniqueCount)
+                            } else {
+                                let viewRows = data.rows.map {
+                                    TopValuesView.ValueRow(value: $0.value, count: $0.count, percentage: $0.percentage)
+                                }
+                                self.profilerSidebar.updateTopValues(rows: viewRows)
+                            }
+                        }
                     }
                 case .failure:
                     // Query failed — keep loading state (may have been cancelled)

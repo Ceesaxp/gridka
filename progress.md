@@ -948,3 +948,33 @@
   - The `isInteger` flag determines NumberFormatter precision: 0 decimals for integer columns, 2 for float — matching the PRD requirement for "appropriate precision"
   - `NumberFormatter.numberStyle = .decimal` with `groupingSeparator = ","` provides thousands separators automatically (e.g., 12,400)
 ----
+
+## 2026-02-26 - US-007 - Show top values list with click-to-filter in profiler
+- Created Sources/UI/TopValuesView.swift: custom Core Graphics NSView displaying the top 10 most frequent values in a column
+  - Each row shows: value text (left, truncated), mini proportional bar (accent color), count (formatted with commas), percentage (e.g., "12.3%")
+  - Hover highlights rows with accent-colored rounded rect background and changes cursor to pointing hand
+  - Clicking a row triggers `onValueClicked` callback with the value string
+  - "Show full frequency →" link at bottom (accent-colored, underlines on hover), triggers `onShowFullFrequency` callback
+  - "All N values are unique" message displayed when uniqueCount >= totalRows
+  - Uses NSTrackingArea for hover and click detection, isFlipped coordinate system for top-down layout
+- Added `buildTopValuesQuery` to ProfilerQueryBuilder: generates `SELECT CAST(col AS VARCHAR) AS val, COUNT(*) AS cnt FROM data WHERE col IS NOT NULL [AND filters] GROUP BY col ORDER BY cnt DESC LIMIT 10`
+- Added `TopValuesData` struct and `fetchTopValues` method to FileSession: runs query on serial queue, respects profilerGeneration counter for stale result rejection, computes percentage from totalRows
+- Added "TOP VALUES" section to ProfilerSidebarView below the statistics section:
+  - Built via `buildTopValuesSection()` with section title label and TopValuesView in Auto Layout
+  - `updateTopValues(rows:)` and `showAllUniqueMessage(uniqueCount:)` public API methods
+  - Section hidden/shown in sync with other sections during loading and column changes
+- Wired top values into TableViewController.updateProfilerSidebar():
+  - Chained `fetchTopValues` call after overview stats (uses totalRows and uniqueCount from overview)
+  - If data.isAllUnique, shows "All N values are unique" message; otherwise shows value rows
+- Wired click-to-filter: clicking a value row creates `ColumnFilter(column:, operator: .equals, value: .string(value))`, replaces any existing filter for that column, calls `onFiltersChanged` to update ViewState
+- "Show full frequency" link is a placeholder (logs column name) — will become functional when US-010 (Frequency Panel) is implemented
+- Files changed: Sources/UI/TopValuesView.swift (new), Sources/UI/ProfilerSidebarView.swift, Sources/Engine/ProfilerQueryBuilder.swift, Sources/Model/FileSession.swift, Sources/UI/TableViewController.swift
+- Build succeeds, all 64 tests pass
+- **Learnings for future iterations:**
+  - The profiler query chain is: overview → (distribution + descriptive stats + top values) in parallel on the serial queue — they execute sequentially but UI updates arrive independently
+  - `fetchTopValues` reuses the same `profilerGeneration` counter as other profiler queries — no separate generation counter needed
+  - TopValuesView uses Core Graphics drawing (matching HistogramView pattern) with NSTrackingArea for hover/click — more consistent than NSView subviews and avoids Auto Layout complexity for dynamic row counts
+  - Click-to-filter replaces existing filters for the same column (via `removeAll { $0.column == selectedCol }`) to avoid duplicate filter chips
+  - The "all unique" check (`uniqueCount >= nonNullRows`) correctly handles columns with some NULL values — uniqueCount only counts non-null distinct values
+  - `make generate` works when `xcodegen generate` is blocked by the sandbox — the Makefile delegates to the same binary but goes through make
+----

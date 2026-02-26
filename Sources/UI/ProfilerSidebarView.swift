@@ -136,6 +136,12 @@ final class ProfilerSidebarView: NSView {
     /// Histogram bar chart for value distribution.
     private let histogramView = HistogramView()
 
+    /// Top values list for value frequency display with click-to-filter.
+    private(set) var topValuesView = TopValuesView()
+
+    /// Container for the top values section.
+    private var topValuesSection: NSView?
+
     /// Loading indicator shown while profiler queries are in flight.
     private let loadingLabel: NSTextField = {
         let label = NSTextField(labelWithString: "Loading…")
@@ -204,6 +210,11 @@ final class ProfilerSidebarView: NSView {
         statisticsSection = statsSection
         stackView.addArrangedSubview(statsSection)
 
+        // Build top values section
+        let tvSection = buildTopValuesSection()
+        topValuesSection = tvSection
+        stackView.addArrangedSubview(tvSection)
+
         showPlaceholder()
     }
 
@@ -236,10 +247,11 @@ final class ProfilerSidebarView: NSView {
         typeBadge.textColor = .white
         typeBadge.layer?.backgroundColor = badgeColor(for: typeName).cgColor
 
-        // Reset overview stats, distribution, and statistics while loading
+        // Reset overview stats, distribution, statistics, and top values while loading
         overviewSection?.isHidden = true
         distributionSection?.isHidden = true
         statisticsSection?.isHidden = true
+        topValuesSection?.isHidden = true
         loadingLabel.isHidden = false
     }
 
@@ -255,6 +267,7 @@ final class ProfilerSidebarView: NSView {
         overviewSection?.isHidden = true
         distributionSection?.isHidden = true
         statisticsSection?.isHidden = true
+        topValuesSection?.isHidden = true
     }
 
     /// Updates the overview stats section with fetched data.
@@ -354,6 +367,25 @@ final class ProfilerSidebarView: NSView {
         statisticsSection?.isHidden = true
     }
 
+    /// Updates the top values section with fetched frequency data.
+    func updateTopValues(rows: [TopValuesView.ValueRow]) {
+        topValuesSection?.isHidden = false
+        topValuesView.allUniqueMessage = nil
+        topValuesView.rows = rows
+    }
+
+    /// Shows the "all unique" message in the top values section.
+    func showAllUniqueMessage(uniqueCount: Int) {
+        topValuesSection?.isHidden = false
+        topValuesView.rows = []
+        topValuesView.allUniqueMessage = "All \(uniqueCount) values are unique"
+    }
+
+    /// Hides the top values section.
+    func hideTopValuesSection() {
+        topValuesSection?.isHidden = true
+    }
+
     // MARK: - Distribution Section Builder
 
     private func buildDistributionSection() -> NSView {
@@ -376,6 +408,34 @@ final class ProfilerSidebarView: NSView {
             histogramView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             histogramView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             histogramView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
+
+        container.isHidden = true
+        return container
+    }
+
+    // MARK: - Top Values Section Builder
+
+    private func buildTopValuesSection() -> NSView {
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+
+        let sectionTitle = NSTextField(labelWithString: "TOP VALUES")
+        sectionTitle.font = NSFont.systemFont(ofSize: 10, weight: .semibold)
+        sectionTitle.textColor = .tertiaryLabelColor
+        sectionTitle.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(sectionTitle)
+        container.addSubview(topValuesView)
+
+        NSLayoutConstraint.activate([
+            sectionTitle.topAnchor.constraint(equalTo: container.topAnchor),
+            sectionTitle.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            sectionTitle.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor),
+
+            topValuesView.topAnchor.constraint(equalTo: sectionTitle.bottomAnchor, constant: 8),
+            topValuesView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            topValuesView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            topValuesView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
 
         container.isHidden = true
