@@ -16,6 +16,12 @@ final class FileSession {
     private let profilerQueryBuilder = ProfilerQueryBuilder()
     private let queryQueue: DispatchQueue
 
+    /// Monotonic generation token for page fetches. Incremented when viewState changes
+    /// invalidate the row cache (sort/filter/search/computed columns). Fetch callbacks
+    /// that carry a stale generation are discarded so rowCache never receives stale data.
+    /// IMPORTANT: Only read/write from the main thread.
+    private var viewStateGeneration: Int = 0
+
     /// Generation counter for profiler queries. Incremented when column selection or
     /// filter/search state changes. Results with a stale generation are discarded.
     /// IMPORTANT: Only read/write from the main thread to avoid data races with queryQueue.
@@ -370,7 +376,7 @@ final class FileSession {
                     self.isFullyLoaded = true
                     self.totalRows = totalRows
                     self.viewState.totalFilteredRows = totalRows
-                    self.rowCache.invalidateAll()
+                    self.invalidateRowCache()
                     progress(1.0)
                     completion(.success(totalRows))
                 }
@@ -387,6 +393,7 @@ final class FileSession {
     func fetchPage(index: Int, completion: @escaping (Result<RowCache.Page, Error>) -> Void) {
         let range = rowCache.pageRange(forPageIndex: index)
         let sql = queryCoordinator.buildQuery(for: viewState, columns: columns, range: range)
+        let generation = viewStateGeneration
 
         queryQueue.async { [weak self] in
             guard let self = self else { return }
@@ -401,11 +408,16 @@ final class FileSession {
                 )
 
                 DispatchQueue.main.async {
+                    // Discard stale results: if viewState changed since this fetch
+                    // was dispatched, the cache was already invalidated and these
+                    // rows correspond to an obsolete sort/filter/search state.
+                    guard generation == self.viewStateGeneration else { return }
                     self.rowCache.insertPage(page)
                     completion(.success(page))
                 }
             } catch {
                 DispatchQueue.main.async {
+                    guard generation == self.viewStateGeneration else { return }
                     completion(.failure(error))
                 }
             }
@@ -508,7 +520,7 @@ final class FileSession {
                         visibleRange: 0..<0,
                         totalFilteredRows: totalRows
                     )
-                    self.rowCache.invalidateAll()
+                    self.invalidateRowCache()
                     self.invalidateColumnSummaries()
                     progress(1.0)
                     completion(.success(totalRows))
@@ -562,7 +574,7 @@ final class FileSession {
                         visibleRange: 0..<0,
                         totalFilteredRows: totalRows
                     )
-                    self.rowCache.invalidateAll()
+                    self.invalidateRowCache()
                     self.invalidateColumnSummaries()
                     progress(1.0)
                     completion(.success(totalRows))
@@ -774,7 +786,7 @@ final class FileSession {
                 DispatchQueue.main.async {
                     self.columns = cols
                     self.isModified = true
-                    self.rowCache.invalidateAll()
+                    self.invalidateRowCache()
                     self.invalidateColumnSummaries()
                     completion(.success(cols))
                 }
@@ -806,7 +818,7 @@ final class FileSession {
                 DispatchQueue.main.async {
                     self.columns = cols
                     self.isModified = true
-                    self.rowCache.invalidateAll()
+                    self.invalidateRowCache()
                     self.invalidateColumnSummaries()
 
                     // Update ViewState: rename in sort columns
@@ -903,7 +915,7 @@ final class FileSession {
                 DispatchQueue.main.async {
                     self.columns = cols
                     self.isModified = true
-                    self.rowCache.invalidateAll()
+                    self.invalidateRowCache()
                     self.invalidateColumnSummaries()
                     completion(.success(cols))
                 }
@@ -934,7 +946,7 @@ final class FileSession {
                 DispatchQueue.main.async {
                     self.columns = cols
                     self.isModified = true
-                    self.rowCache.invalidateAll()
+                    self.invalidateRowCache()
                     self.invalidateColumnSummaries()
 
                     // Remove any sort columns referencing the deleted column
@@ -1023,7 +1035,7 @@ final class FileSession {
                 DispatchQueue.main.async {
                     self.totalRows = newTotal
                     self.isModified = true
-                    self.rowCache.invalidateAll()
+                    self.invalidateRowCache()
                     self.invalidateColumnSummaries()
 
                     // Remove edited cell indicators for deleted rows
@@ -2124,7 +2136,7 @@ final class FileSession {
         viewState = newState
 
         if cacheInvalidated {
-            rowCache.invalidateAll()
+            invalidateRowCache()
         }
         // Re-query count when filters/search change, or when computed columns
         // change while a search term is active (search includes computed aliases)
@@ -2139,6 +2151,14 @@ final class FileSession {
     }
 
     // MARK: - Private Helpers
+
+    /// Invalidates the entire row cache and bumps the view-state generation so that
+    /// any in-flight page fetches dispatched before this point are discarded on arrival.
+    /// Must be called on the main thread.
+    private func invalidateRowCache() {
+        viewStateGeneration += 1
+        rowCache.invalidateAll()
+    }
 
     private func requeryCount() {
         let sql = queryCoordinator.buildCountQuery(for: viewState, columns: columns)

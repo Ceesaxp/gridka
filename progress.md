@@ -1433,3 +1433,30 @@
   - The existing `tableName` property on FileSession (defaulting to "data") naturally supports summary sessions — QueryCoordinator's `buildSourceExpression` returns "data" for non-computed-column queries, but for summary sessions the tableName is set to the temp table name directly, and since summary sessions have no computed columns, the query simply becomes `SELECT * FROM summary_N`.
   - The rebalanceMemoryLimits doesn't double-count summary sessions that share an engine — memory limit SET calls go through the shared queryQueue and engine, so the last-applied limit wins. This is acceptable since summary tabs use negligible memory compared to source data.
 ----
+
+## 2026-02-26, 20:12 - US-023 - Review fixes: harden summary tab
+- **P1 fix**: Made summary tabs strictly read-only by disabling all mutating menu items in `validateMenuItem` (save, saveAs, addColumn, renameColumn, deleteColumn, addRow, deleteRows, toggleHeader, changeDelimiter, changeEncoding, customDelimiter) and guarding `onCellEdited` callback. The `isSummarySession` check is early-exit for each action.
+- **P2 fix (profiler)**: Added `tableName` computed property to `ProfilerQueryBuilder` that proxies through to its internal `QueryCoordinator.tableName`. Set in FileSession's summary init alongside the main queryCoordinator. Also replaced hardcoded `FROM data` in 4 batch summary methods (buildBatchCardinalityQuery, buildSummaryNumericHistogramQuery, buildSummaryCategoricalFrequencyQuery, buildSummaryBooleanDistributionQuery) with `FROM \(tableName)`.
+- **P2 fix (cleanup)**: Changed `dropSummaryTable()` to capture `engine` strongly (not `[weak self]`) so the DROP TABLE executes reliably even if the FileSession is deallocated before the serial queue drains.
+- Files changed: Sources/App/AppDelegate.swift, Sources/Engine/ProfilerQueryBuilder.swift, Sources/Model/FileSession.swift
+- Build succeeds, all 71 tests pass
+- **Learnings for future iterations:**
+  - When introducing a new session type (summary), audit ALL query-building paths — not just QueryCoordinator but also ProfilerQueryBuilder and any other query builders that have their own QueryCoordinator instances.
+  - Cleanup work items dispatched to a serial queue must capture resources strongly if the owning object may be deallocated before the queue drains. Using `[weak self]` is safe for queries (skipping is harmless) but wrong for cleanup (skipping leaks resources).
+  - Menu validation is the correct AppKit mechanism for making sessions read-only — it covers all menu actions, keyboard shortcuts, and toolbar items in one place. No need to scatter guards across individual action handlers.
+----
+
+## 2026-02-26, 20:30 - US-101 - Add view-state generation token for page fetches
+- Added `viewStateGeneration: Int` monotonic counter to FileSession (main-thread only)
+- `fetchPage` captures the generation before dispatching to queryQueue; callback checks generation matches before calling `rowCache.insertPage` — stale results are silently discarded
+- Created `invalidateRowCache()` private helper that atomically bumps generation + clears cache
+- Replaced all 10 `rowCache.invalidateAll()` call sites with `invalidateRowCache()` — covers: full file load, reload (header/delimiter/encoding), column add/delete/rename, row delete, and `updateViewState`
+- Single-page invalidations (`invalidatePage`) intentionally left without generation bump — they don't change query shape (sort/filter/search unchanged) so in-flight fetches for other pages remain valid
+- Files changed: Sources/Model/FileSession.swift, plans/prd.json
+- Build succeeds, all 71 tests pass
+- **Learnings for future iterations:**
+  - The generation counter pattern is now used in 4 places in FileSession: `viewStateGeneration` (page fetches), `profilerGeneration` (profiler queries), `summaryGeneration` (column summaries), and `previewGeneration` (Group By preview in GroupByPanelController)
+  - All cache invalidation should go through a single helper method to ensure generation is always bumped alongside the cache clear — prevents forgetting one or the other
+  - The `fetchPage` completion is suppressed (not called) when generation is stale, which is safe because callers (TableViewController.requestPageFetch, AppDelegate sort/filter handlers) only use the completion to reload visible rows — stale data would cause incorrect display
+  - `rowCache.invalidatePage` (singular) for cell edits doesn't need generation bumping because the in-flight fetch used the same SQL query shape; worst case it re-inserts the pre-edit value which gets corrected on next access
+----
