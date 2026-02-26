@@ -408,16 +408,18 @@ final class FileSession {
                 )
 
                 DispatchQueue.main.async {
-                    // Discard stale results: if viewState changed since this fetch
-                    // was dispatched, the cache was already invalidated and these
-                    // rows correspond to an obsolete sort/filter/search state.
-                    guard generation == self.viewStateGeneration else { return }
-                    self.rowCache.insertPage(page)
+                    // Skip cache insert for stale results: if viewState changed
+                    // since this fetch was dispatched, the cache was already
+                    // invalidated and these rows are from an obsolete state.
+                    // Always call completion so callers can clear bookkeeping
+                    // state (e.g. fetchingPages in TableViewController).
+                    if generation == self.viewStateGeneration {
+                        self.rowCache.insertPage(page)
+                    }
                     completion(.success(page))
                 }
             } catch {
                 DispatchQueue.main.async {
-                    guard generation == self.viewStateGeneration else { return }
                     completion(.failure(error))
                 }
             }
