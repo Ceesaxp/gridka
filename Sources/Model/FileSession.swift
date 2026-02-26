@@ -1750,6 +1750,35 @@ final class FileSession {
         let rows: [[String]]
     }
 
+    /// Returns true if `sql` contains a semicolon outside of single-quoted string literals.
+    /// Handles SQL-standard doubled single quotes (`''`) as an escaped quote inside a literal.
+    static func containsSemicolonOutsideQuotes(_ sql: String) -> Bool {
+        var inString = false
+        var i = sql.startIndex
+        while i < sql.endIndex {
+            let ch = sql[i]
+            if inString {
+                if ch == "'" {
+                    let next = sql.index(after: i)
+                    if next < sql.endIndex && sql[next] == "'" {
+                        // Escaped quote (''), skip both
+                        i = sql.index(after: next)
+                        continue
+                    }
+                    inString = false
+                }
+            } else {
+                if ch == "'" {
+                    inString = true
+                } else if ch == ";" {
+                    return true
+                }
+            }
+            i = sql.index(after: i)
+        }
+        return false
+    }
+
     /// Executes a preview query for a computed column expression.
     /// Selects up to 3 existing columns for context plus the expression result, LIMIT 5.
     /// Completion is called on the main thread with either the preview data or an error.
@@ -1758,12 +1787,13 @@ final class FileSession {
         columnName: String,
         completion: @escaping (Result<ComputedColumnPreview, Error>) -> Void
     ) {
-        // Reject semicolons — a valid SQL expression never contains one.
-        // This prevents multi-statement injection (e.g. "1); COMMIT; DELETE FROM data; --")
-        // that could escape the read-only transaction below.
-        if expression.contains(";") {
+        // Reject semicolons outside string literals to prevent multi-statement injection
+        // (e.g. "1); COMMIT; DELETE FROM data; --") that could escape the read-only
+        // transaction below. Semicolons inside single-quoted literals are safe
+        // (e.g. REPLACE(col, ';', ',')).
+        if Self.containsSemicolonOutsideQuotes(expression) {
             DispatchQueue.main.async {
-                completion(.failure(GridkaError.invalidExpression("Expression must not contain semicolons")))
+                completion(.failure(GridkaError.invalidExpression("Expression must not contain semicolons outside of string literals")))
             }
             return
         }
