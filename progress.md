@@ -1141,3 +1141,38 @@
   - Created `applyFrequencyFilter(columnName:value:session:)` method that targets a specific session/TVC instead of relying on `handleFiltersChanged` which uses `activeTab`
   - The replace-existing-filter pattern (`removeAll` + `append`) prevents duplicate filter chips when clicking multiple values in the same column
 ----
+
+## 2026-02-26 - US-014 - Compute and cache column summaries on file load
+- Created Sources/Model/ColumnSummary.swift with `ColumnSummary` struct and `Distribution` enum:
+  - `ColumnSummary`: columnName, detectedType, cardinality (distinct count), nullCount, totalRows, distribution, computed `completeness` property
+  - `Distribution` enum with 4 cases: `.histogram(buckets:)` for numeric, `.frequency(values:)` for low-cardinality categorical (≤15 unique), `.boolean(trueCount:falseCount:)` for booleans, `.highCardinality(uniqueCount:)` for high-cardinality text (>15 unique)
+- Extended ProfilerQueryBuilder with 4 new summary-specific query builders:
+  - `buildBatchCardinalityQuery(columns:)` — UNION ALL query fetching cardinality + null count for ALL columns in a single query (batch optimization)
+  - `buildSummaryNumericHistogramQuery(columnName:)` — WIDTH_BUCKET histogram with no WHERE filter (all data)
+  - `buildSummaryCategoricalFrequencyQuery(columnName:limit:)` — top-N frequency query with no WHERE filter
+  - `buildSummaryBooleanDistributionQuery(columnName:)` — true/false counts with no WHERE filter
+- Extended FileSession with summary computation infrastructure:
+  - `summaryGeneration: Int` counter for discarding stale summary results (matching profilerGeneration pattern)
+  - `columnSummaries: [String: ColumnSummary]` cached dictionary
+  - `onSummariesComputed: (() -> Void)?` callback for UI updates (US-015 sparklines)
+  - `computeColumnSummaries()` — two-phase batch computation: (1) single UNION ALL query for cardinality/nulls across all columns, (2) per-column distribution queries based on type + cardinality. Each phase checks generation counter for early abort
+  - `invalidateColumnSummaries()` — increments generation counter and clears cache
+  - Private helpers: `computeBooleanDistribution`, `computeNumericDistribution`, `computeCategoricalDistribution`
+- Added `invalidateColumnSummaries()` calls to ALL data mutation methods:
+  - `updateCell` (cell edit), `deleteRows` (row deletion), `deleteColumn` (column deletion), `addColumn` (column addition), `renameColumn` (column rename), `changeColumnType` (type change), `reloadTable` (header/delimiter/encoding reload), `addRow` (new row)
+- Triggered `session.computeColumnSummaries()` in AppDelegate after:
+  - `loadFull` completion (initial file load)
+  - `reload(withHeaders:)` completion (header toggle reload)
+  - `reload(withDelimiter:)` completion (delimiter change reload)
+  - `reload(withEncoding:)` completion (encoding change reload)
+- Files changed: Sources/Model/ColumnSummary.swift (new), Sources/Engine/ProfilerQueryBuilder.swift, Sources/Model/FileSession.swift, Sources/App/AppDelegate.swift, plans/prd.json
+- Build succeeds, all 64 tests pass
+- **Learnings for future iterations:**
+  - The batch UNION ALL cardinality query avoids N individual queries — much more efficient for files with many columns
+  - Summary distribution queries intentionally have NO WHERE filter clause — they summarize the entire dataset, not the filtered view. This is different from profiler queries which respect ViewState filters
+  - The `summaryGeneration` counter is separate from `profilerGeneration` — they serve different lifecycles (summaries are invalidated on data mutation, profiler on column selection/filter change)
+  - `DispatchQueue.main.sync` is used for generation counter checks within the queryQueue async block — this is safe because main thread doesn't call into queryQueue synchronously (no deadlock risk)
+  - The summary computation is designed for sparkline rendering (US-015) — the Distribution enum's 4 cases map directly to the sparkline visual types: mini histogram, mini frequency bars, two-segment boolean bar, and "N unique" text badge
+  - The `onSummariesComputed` callback will be wired in US-015 to trigger header sparkline rendering once summaries are available
+  - Categorical distribution uses a threshold of 15 unique values (matching US-015 sparkline requirement), not 50 (which is used by the profiler's distribution section)
+----

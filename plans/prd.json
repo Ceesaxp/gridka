@@ -236,7 +236,7 @@
         "Compiles and runs without crashes"
       ],
       "priority": 14,
-      "passes": false,
+      "passes": true,
       "notes": "Create a ColumnSummary struct and a Distribution enum with cases: .histogram(buckets: [(range: String, count: Int)]), .frequency(values: [(value: String, count: Int)]), .boolean(trueCount: Int, falseCount: Int), .highCardinality(uniqueCount: Int). Batch queries: one for cardinality/nulls across all columns, then per-column distribution queries."
     },
     {
