@@ -93,6 +93,10 @@ final class TableViewController: NSViewController {
     /// Called when 'Value Frequency...' is selected in the header context menu. Parameter: columnName.
     var onValueFrequency: ((String) -> Void)?
 
+    /// Called when a sparkline is clicked in a column header. Parameter: columnName.
+    /// This should select the column AND open the profiler sidebar.
+    var onSparklineClicked: ((String) -> Void)?
+
     /// Called when an analysis feature button is toggled. Parameters: (feature, isActive).
     var onAnalysisFeatureToggled: ((AnalysisFeature, Bool) -> Void)?
 
@@ -459,6 +463,16 @@ final class TableViewController: NSViewController {
         }
 
         onSortChanged?(sortColumns)
+    }
+
+    /// Called when the user clicks in the sparkline area (lower ~16pt) of a column header.
+    /// Selects the column and opens the profiler sidebar if not already open.
+    func handleSparklineClick(columnIndex: Int) {
+        guard let session = fileSession, session.isFullyLoaded else { return }
+        guard columnIndex >= 0, columnIndex < tableView.tableColumns.count else { return }
+
+        let columnName = tableView.tableColumns[columnIndex].identifier.rawValue
+        onSparklineClicked?(columnName)
     }
 
     // MARK: - Filter Management
@@ -1963,6 +1977,15 @@ private final class AutoFitTableHeaderView: NSTableHeaderView {
             }
         }
 
+        // Check if click is in the sparkline area (lower ~16pt) of a column header.
+        // This selects the column AND opens the profiler.
+        if event.clickCount == 1, !event.modifierFlags.contains(.option) {
+            if let columnIndex = sparklineColumnIndex(at: localPoint) {
+                tableViewController?.handleSparklineClick(columnIndex: columnIndex)
+                return
+            }
+        }
+
         // Check if click is in the sort indicator area of a sorted column
         if event.clickCount == 1, !event.modifierFlags.contains(.option) {
             if let columnIndex = sortIndicatorColumnIndex(at: localPoint) {
@@ -1986,6 +2009,24 @@ private final class AutoFitTableHeaderView: NSTableHeaderView {
             if abs(point.x - xOffset) <= borderThreshold {
                 return index
             }
+        }
+        return nil
+    }
+
+    /// Returns the column index if the click point is within the sparkline area
+    /// (lower ~16pt) of any column header. Returns nil if the click is in the text area above.
+    private func sparklineColumnIndex(at point: NSPoint) -> Int? {
+        guard let tableView = tableView else { return nil }
+        let sparklineTop = SparklineHeaderCell.totalHeaderHeight - SparklineHeaderCell.sparklineHeight
+        guard point.y >= sparklineTop else { return nil }
+
+        var xOffset: CGFloat = 0
+        for (index, column) in tableView.tableColumns.enumerated() {
+            let columnRight = xOffset + column.width
+            if point.x >= xOffset && point.x <= columnRight {
+                return index
+            }
+            xOffset = columnRight + tableView.intercellSpacing.width
         }
         return nil
     }

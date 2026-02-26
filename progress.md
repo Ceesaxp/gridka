@@ -1202,3 +1202,26 @@
   - SparklineHeaderCell.columnSummary is set in two paths: (1) during makeTableColumn when configuring columns, and (2) via updateSparklines() when summaries finish computing asynchronously
   - The onSummariesComputed callback is set once in openFile() alongside onModifiedChanged — it persists across reload operations since the same session is reused
 ----
+
+## 2026-02-26 - US-016 - Click sparkline to open profiler for that column
+- Added sparkline click detection to AutoFitTableHeaderView.mouseDown(with:):
+  - New `sparklineColumnIndex(at:)` method checks if click point Y is within the lower sparkline area (y >= totalHeaderHeight - sparklineHeight = 28pt in flipped coordinates)
+  - If in sparkline area, identifies which column was clicked by iterating column x-offsets
+  - Sparkline click check runs before sort indicator check, since sort indicators are in the upper text region
+- Added `handleSparklineClick(columnIndex:)` method to TableViewController:
+  - Resolves column index to column name and calls `onSparklineClicked` callback
+  - Guards against invalid index, unloaded file, same pattern as `handleSortIndicatorClick`
+- Added `onSparklineClicked: ((String) -> Void)?` callback on TableViewController
+- Wired `onSparklineClicked` callback in AppDelegate (in `showTableView`):
+  - Calls `handleColumnSelected(tab:columnName:)` to select the column (updates ViewState, profiler content)
+  - Opens profiler sidebar via `tvc.toggleProfilerSidebar()` if not already visible
+  - If profiler is already open, just switches to the clicked column (via handleColumnSelected)
+- Click target distinction: clicking the lower ~16pt (sparkline area) of a header triggers sparkline behavior (select + open profiler); clicking the upper ~27pt (column name text area) triggers standard column select behavior (per US-001)
+- Files changed: Sources/UI/TableViewController.swift, Sources/App/AppDelegate.swift, plans/prd.json
+- Build succeeds, all 64 tests pass
+- **Learnings for future iterations:**
+  - NSTableHeaderView is flipped (y=0 at top), so the sparkline area threshold is `y >= totalHeaderHeight - sparklineHeight` (i.e., y >= 28pt)
+  - The sparkline click check must come before the sort indicator click check in mouseDown — both check `event.clickCount == 1` without Option, but the sparkline area and sort indicator area can overlap (sort indicator is in the rightmost 24pt of sorted columns, which spans the full height including sparkline area)
+  - `SparklineHeaderCell.sparklineHeight` and `totalHeaderHeight` are already `static let` properties, making them accessible from AutoFitTableHeaderView for hit-testing
+  - The `onSparklineClicked` callback uses the same weak-self + tab-lookup pattern as `onColumnSelected` and other callbacks wired in `showTableView`
+----

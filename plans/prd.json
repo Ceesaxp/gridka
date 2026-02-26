@@ -269,7 +269,7 @@
         "Compiles and runs without crashes"
       ],
       "priority": 16,
-      "passes": false,
+      "passes": true,
       "notes": "Hit-test the click position within the header cell — if in the lower sparkline region, trigger profiler open + column select. If in the upper name region, just column select (per US-001)."
     },
     {

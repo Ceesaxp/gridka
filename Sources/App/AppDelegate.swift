@@ -677,6 +677,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             self.handleColumnSelected(tab: tab, columnName: columnName)
         }
 
+        tvc.onSparklineClicked = { [weak self, weak tvc] columnName in
+            guard let self = self, let tvc = tvc, let tab = self.tab(for: tvc) else { return }
+            // Select the column
+            self.handleColumnSelected(tab: tab, columnName: columnName)
+            // Open the profiler sidebar if not already open
+            if !tvc.isProfilerVisible {
+                tvc.toggleProfilerSidebar()
+            }
+        }
+
         tvc.onAnalysisFeatureToggled = { [weak self, weak tvc] feature, isActive in
             guard let self = self, let tvc = tvc, let tab = self.tab(for: tvc) else { return }
             self.handleAnalysisFeatureToggled(tab: tab, feature: feature, isActive: isActive)
