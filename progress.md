@@ -1176,3 +1176,29 @@
   - The `onSummariesComputed` callback will be wired in US-015 to trigger header sparkline rendering once summaries are available
   - Categorical distribution uses a threshold of 15 unique values (matching US-015 sparkline requirement), not 50 (which is used by the profiler's distribution section)
 ----
+
+## 2026-02-26 - US-015 - Render sparklines in column headers
+- Created Sources/UI/SparklineHeaderCell.swift — custom NSTableHeaderCell subclass that draws mini sparkline visualizations below the column name text using Core Graphics
+- Four sparkline types based on Distribution enum:
+  - **Numeric columns (.histogram):** Mini vertical bar chart with 8-10 bars showing distribution shape, using systemBlue
+  - **Low-cardinality categorical (.frequency, ≤15 unique):** Mini vertical bars for top values sorted by frequency, using systemTeal
+  - **Boolean columns (.boolean):** Two-segment horizontal bar with proportional true/false widths (green/red) and percentage labels
+  - **High-cardinality text (.highCardinality, >15 unique):** Text badge showing "N unique" in secondaryLabelColor
+- Updated AutoFitTableHeaderView header height from 23pt to 44pt (via SparklineHeaderCell.totalHeaderHeight) to accommodate sparkline row (~16pt sparkline area below text)
+- Updated TableViewController.makeTableColumn() to use SparklineHeaderCell instead of default NSTableHeaderCell, applying column summary data when available
+- Added TableViewController.updateSparklines() method that iterates all table columns, updates their SparklineHeaderCell.columnSummary from FileSession.columnSummaries cache, and marks headerView for redisplay
+- Wired FileSession.onSummariesComputed callback in AppDelegate.openFile() to call tab?.tableViewController?.updateSparklines() — triggers header refresh when column summaries finish computing after file load
+- Sparklines use cached ColumnSummary data (computed in US-014) — no queries on render, instant display
+- Drawing uses Core Graphics: CGPath(roundedRect:) for bars, ctx.saveGState/restoreGState for state management, NSString.draw(at:withAttributes:) for text labels
+- Manually added SparklineHeaderCell.swift to Gridka.xcodeproj/project.pbxproj (PBXBuildFile, PBXFileReference, UI group, Sources build phase)
+- Files changed: Sources/UI/SparklineHeaderCell.swift (new), Sources/UI/TableViewController.swift, Sources/App/AppDelegate.swift, Gridka.xcodeproj/project.pbxproj, plans/prd.json
+- Build succeeds, all 64 tests pass
+- **Learnings for future iterations:**
+  - NSTableHeaderCell can be subclassed and assigned to column.headerCell — the cell's draw(withFrame:in:) is called by the header view for each column
+  - To increase header height, set the frame height in the AutoFitTableHeaderView init (NSTableHeaderView subclass)
+  - The sparkline drawing area is computed as the lower portion of the cell frame; the upper portion is passed to super.draw() for standard text rendering
+  - Clipping the CGContext to the sparkline frame prevents sparkline drawing from overflowing into the text area
+  - xcodegen was not accessible via CLI, so the pbxproj was manually edited to add the new file — requires 4 additions: PBXBuildFile, PBXFileReference, group children entry, and Sources build phase entry
+  - SparklineHeaderCell.columnSummary is set in two paths: (1) during makeTableColumn when configuring columns, and (2) via updateSparklines() when summaries finish computing asynchronously
+  - The onSummariesComputed callback is set once in openFile() alongside onModifiedChanged — it persists across reload operations since the same session is reused
+----

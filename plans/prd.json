@@ -255,7 +255,7 @@
         "Compiles and runs without crashes"
       ],
       "priority": 15,
-      "passes": false,
+      "passes": true,
       "notes": "This requires subclassing NSTableHeaderCell or adding NSView overlays to the header view. Core Graphics drawing should be lightweight — just rectangles with rounded corners and colors. Use system colors that respect dark mode. The header height change affects the NSTableHeaderView."
     },
     {

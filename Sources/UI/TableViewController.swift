@@ -419,6 +419,19 @@ final class TableViewController: NSViewController {
         }
     }
 
+    /// Updates sparkline data on all column header cells from cached column summaries.
+    /// Called when column summaries finish computing (via onSummariesComputed callback).
+    func updateSparklines() {
+        guard let session = fileSession else { return }
+        for tableColumn in tableView.tableColumns {
+            let columnName = tableColumn.identifier.rawValue
+            if let sparklineCell = tableColumn.headerCell as? SparklineHeaderCell {
+                sparklineCell.columnSummary = session.columnSummaries[columnName]
+            }
+        }
+        tableView.headerView?.needsDisplay = true
+    }
+
     /// Called by AutoFitTableHeaderView when the user clicks on the sort indicator area
     /// of a sorted column header. Triggers sort cycling without requiring the Option key.
     func handleSortIndicatorClick(columnIndex: Int, event: NSEvent) {
@@ -1336,6 +1349,16 @@ final class TableViewController: NSViewController {
         // Set tooltip to full DuckDB type name
         column.headerToolTip = duckDBTypeName(for: descriptor)
 
+        // Use SparklineHeaderCell for sparkline rendering in column headers
+        let sparklineCell = SparklineHeaderCell()
+        column.headerCell = sparklineCell
+
+        // Apply column summary if available
+        if let session = fileSession,
+           let summary = session.columnSummaries[descriptor.name] {
+            sparklineCell.columnSummary = summary
+        }
+
         styleHeaderCell(column.headerCell, descriptor: descriptor)
 
         return column
@@ -1923,7 +1946,7 @@ private final class AutoFitTableHeaderView: NSTableHeaderView {
 
     init(tableViewController: TableViewController) {
         self.tableViewController = tableViewController
-        super.init(frame: NSRect(x: 0, y: 0, width: 0, height: 23))
+        super.init(frame: NSRect(x: 0, y: 0, width: 0, height: SparklineHeaderCell.totalHeaderHeight))
     }
 
     required init?(coder: NSCoder) {

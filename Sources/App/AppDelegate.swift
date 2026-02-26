@@ -509,6 +509,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 win?.isDocumentEdited = modified
             }
 
+            // Wire sparkline refresh when column summaries are computed (US-015)
+            session.onSummariesComputed = { [weak tab] in
+                tab?.tableViewController?.updateSparklines()
+            }
+
             showTableView(in: win, tab: tab)
 
             let tvc = tab.tableViewController
