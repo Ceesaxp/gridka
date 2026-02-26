@@ -113,6 +113,10 @@ final class ComputedColumnPanelController: NSWindowController, NSWindowDelegate 
     private var previewColumnNames: [String] = []
     /// Row data from the last successful preview result.
     private var previewRows: [[String]] = []
+    /// Height constraint for preview container — deactivated when hidden to reclaim space.
+    private var previewHeightConstraint: NSLayoutConstraint!
+    /// Tracks whether the current error is from a preview query (vs. validation).
+    private var errorIsFromPreview = false
 
     // MARK: - Function Hint Chips
 
@@ -215,6 +219,8 @@ final class ComputedColumnPanelController: NSWindowController, NSWindowDelegate 
         previewContainer = NSView()
         previewContainer.translatesAutoresizingMaskIntoConstraints = false
         previewContainer.isHidden = true
+        previewHeightConstraint = previewContainer.heightAnchor.constraint(equalToConstant: 120)
+        previewHeightConstraint.isActive = false // starts hidden, no height claimed
         contentView.addSubview(previewContainer)
 
         previewTableView = NSTableView()
@@ -300,7 +306,6 @@ final class ComputedColumnPanelController: NSWindowController, NSWindowDelegate 
             previewContainer.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
             previewContainer.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
             previewContainer.topAnchor.constraint(equalTo: previewLabel.bottomAnchor, constant: 4),
-            previewContainer.heightAnchor.constraint(equalToConstant: 120),
 
             // Buttons
             addButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
@@ -321,6 +326,8 @@ final class ComputedColumnPanelController: NSWindowController, NSWindowDelegate 
 
         // Preview hidden initially — shown when expression has content
         previewLabel.isHidden = true
+        // Height constraint starts inactive since preview is hidden
+        previewHeightConstraint.isActive = false
     }
 
     /// Creates a flow-layout container with function hint chip buttons.
@@ -431,14 +438,29 @@ final class ComputedColumnPanelController: NSWindowController, NSWindowDelegate 
         addButton.isEnabled = !name.isEmpty && !expression.isEmpty
     }
 
-    private func showError(_ message: String) {
+    private func showError(_ message: String, isPreview: Bool = false) {
         errorLabel.stringValue = message
         errorLabel.isHidden = false
+        errorIsFromPreview = isPreview
     }
 
     private func hideError() {
         errorLabel.stringValue = ""
         errorLabel.isHidden = true
+        errorIsFromPreview = false
+    }
+
+    /// Clears the error label only if it was set by a preview query.
+    private func hidePreviewError() {
+        guard errorIsFromPreview else { return }
+        hideError()
+    }
+
+    /// Shows or hides the preview container, toggling the height constraint to reclaim layout space.
+    private func setPreviewVisible(_ visible: Bool) {
+        previewContainer.isHidden = !visible
+        previewLabel.isHidden = !visible
+        previewHeightConstraint.isActive = visible
     }
 
     // MARK: - Preview (US-018)
@@ -450,8 +472,7 @@ final class ComputedColumnPanelController: NSWindowController, NSWindowDelegate 
 
         let expression = expressionTextView.string.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !expression.isEmpty else {
-            previewLabel.isHidden = true
-            previewContainer.isHidden = true
+            setPreviewVisible(false)
             previewColumnNames = []
             previewRows = []
             return
@@ -478,12 +499,11 @@ final class ComputedColumnPanelController: NSWindowController, NSWindowDelegate 
             guard self.previewGeneration == generation else { return }
             switch result {
             case .success(let preview):
-                self.hideError()
+                self.hidePreviewError()
                 self.updatePreviewTable(columnNames: preview.columnNames, rows: preview.rows)
             case .failure(let error):
-                self.showError(error.localizedDescription)
-                self.previewLabel.isHidden = true
-                self.previewContainer.isHidden = true
+                self.showError(error.localizedDescription, isPreview: true)
+                self.setPreviewVisible(false)
             }
         }
     }
@@ -520,8 +540,7 @@ final class ComputedColumnPanelController: NSWindowController, NSWindowDelegate 
 
         previewTableView.reloadData()
         previewTableView.sizeToFit()
-        previewLabel.isHidden = false
-        previewContainer.isHidden = false
+        setPreviewVisible(true)
     }
 
     // MARK: - NSWindowDelegate
