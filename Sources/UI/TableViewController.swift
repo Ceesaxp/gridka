@@ -652,6 +652,7 @@ final class TableViewController: NSViewController {
                 outerSplitView.animator().setPosition(outerSplitView.bounds.width, ofDividerAt: 0)
             }, completionHandler: { [weak self] in
                 self?.profilerSidebar.isHidden = true
+                self?.outerSplitView.adjustSubviews()
             })
         } else {
             profilerSidebar.isHidden = true
