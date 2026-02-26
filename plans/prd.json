@@ -170,7 +170,7 @@
         "Compiles and runs without crashes"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "Create a FrequencyPanelController managing an NSPanel. The panel should be similar to macOS Font panel or Colors panel in behavior. Use NSPanel with .utilityWindow and .nonactivatingPanel style masks."
     },
     {

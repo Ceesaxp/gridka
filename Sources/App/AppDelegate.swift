@@ -633,9 +633,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             self.handleColumnDeleted(tab: tab, columnName: columnName)
         }
 
-        tvc.onValueFrequency = { columnName in
-            NSLog("Value Frequency requested for column: \(columnName)")
-            // Placeholder: will open FrequencyPanelController in US-010
+        tvc.onValueFrequency = { [weak tvc] columnName in
+            guard let tvc = tvc, let session = tvc.fileSession else { return }
+            FrequencyPanelController.show(column: columnName, fileSession: session)
         }
 
         tvc.onColumnSelected = { [weak self, weak tvc] columnName in
@@ -1261,7 +1261,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             if isActive != tvc.isProfilerVisible {
                 tvc.toggleProfilerSidebar()
             }
-        case .frequency, .groupBy, .computedColumn:
+        case .frequency:
+            if isActive {
+                if let selectedCol = tab.fileSession?.viewState.selectedColumn,
+                   let session = tab.fileSession {
+                    FrequencyPanelController.show(column: selectedCol, fileSession: session)
+                }
+            } else {
+                FrequencyPanelController.closeIfOpen()
+            }
+            tvc.analysisBar.setFeatureActive(.frequency, active: FrequencyPanelController.isVisible)
+        case .groupBy, .computedColumn:
             // Placeholder: these features are implemented in later stories.
             break
         }

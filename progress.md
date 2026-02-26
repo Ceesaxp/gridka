@@ -1019,3 +1019,35 @@
   - The `_ = tvc` line in the AppDelegate callback suppresses the unused variable warning for the weak capture — the closure needs `[weak tvc]` for memory safety but only uses `columnName`
   - US-009 is a pure UI-layer change — no model, engine, or query changes needed
 ----
+
+## 2026-02-26 - US-010 - Create frequency floating panel (NSPanel)
+- Created Sources/UI/FrequencyPanelController.swift: NSWindowController managing an NSPanel for frequency display
+  - NSPanel with `.utilityWindow` style mask, `.floating` level, `isFloatingPanel = true`, `becomesKeyOnlyIfNeeded = true`
+  - `isReleasedWhenClosed = false` to prevent ARC zombie crashes (per project memory)
+  - Minimum size 300×200, default size 500×400
+  - Panel title: "Column Name — Value Frequency"
+  - Close button via `.closable` style mask; Escape dismissal via standard NSPanel behavior
+  - `.moveToActiveSpace` collection behavior for workspace following
+  - Static `show(column:fileSession:)` method with singleton pattern (same as SettingsWindowController/HelpWindowController)
+  - Panel position/size remembered within app session via static `savedFrame` property (not persisted to disk)
+  - `windowDidMove`/`windowDidResize` delegate methods update saved frame on every change
+  - `windowWillClose` saves frame and clears singleton reference
+  - Static `closeIfOpen()` and `isVisible` helpers for toolbar button integration
+  - Placeholder label "Frequency data will appear here." (actual table content in US-011)
+- Wired `onValueFrequency` callback in AppDelegate to `FrequencyPanelController.show()`:
+  - Context menu "Value Frequency…" → opens panel for clicked column
+  - Profiler "Show full frequency →" link → opens panel for selected column (routes through same callback)
+- Wired toolbar Frequency button in `handleAnalysisFeatureToggled()`:
+  - Toggle on: opens panel for currently selected column (if any)
+  - Toggle off: closes panel via `FrequencyPanelController.closeIfOpen()`
+  - Button state synced to actual panel visibility after action
+- Files changed: Sources/UI/FrequencyPanelController.swift (new), Sources/App/AppDelegate.swift, plans/prd.json
+- Build succeeds, all 64 tests pass
+- **Learnings for future iterations:**
+  - NSPanel with `.utilityWindow` gives the floating utility window appearance (smaller title bar, stays above regular windows)
+  - `becomesKeyOnlyIfNeeded = true` allows the panel to float without stealing focus from the main table — clicking in the main window doesn't need to close the panel first
+  - NSPanel automatically handles Escape key dismissal when it's key — no need for custom `keyDown` override
+  - The singleton pattern (static `shared`) works well for panels that should only have one instance — closing replaces rather than stacking
+  - When showing frequency for a different column, the old panel is closed and a new one opened (updating title) rather than trying to mutate the existing panel in-place
+  - The toolbar button state sync (`setFeatureActive`) must happen after the panel show/close action to reflect actual state (e.g., show may fail if no column is selected)
+----
