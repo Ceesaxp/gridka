@@ -16,8 +16,9 @@ final class FileSession {
     private let profilerQueryBuilder = ProfilerQueryBuilder()
     private let queryQueue = DispatchQueue(label: "com.gridka.query-queue")
 
-    /// Generation counter for profiler queries. Incremented when column selection changes.
-    /// Results with a stale generation are discarded to prevent outdated data from appearing.
+    /// Generation counter for profiler queries. Incremented when column selection or
+    /// filter/search state changes. Results with a stale generation are discarded.
+    /// IMPORTANT: Only read/write from the main thread to avoid data races with queryQueue.
     private var profilerGeneration: Int = 0
 
     private(set) var tableName: String = "data"
@@ -918,7 +919,8 @@ final class FileSession {
 
     /// Fetches overview stats (rows, unique, nulls, empty) for the given column.
     /// The completion handler is called on the main thread.
-    /// If a new column is selected before results arrive, stale results are discarded.
+    /// If a new column is selected or filters change before results arrive, stale results are discarded.
+    /// Must be called from the main thread (generation counter is main-thread-only).
     func fetchOverviewStats(columnName: String, completion: @escaping (Result<OverviewStats, Error>) -> Void) {
         profilerGeneration += 1
         let generation = profilerGeneration
@@ -934,30 +936,21 @@ final class FileSession {
             do {
                 let result = try self.engine.execute(sql)
 
-                // Discard stale results if user selected a different column
-                guard self.profilerGeneration == generation else { return }
-
-                guard result.rowCount > 0 else {
-                    DispatchQueue.main.async {
-                        completion(.success(OverviewStats(totalRows: 0, uniqueCount: 0, nullCount: 0, emptyCount: 0)))
-                    }
-                    return
-                }
-
+                // Parse results on queryQueue before dispatching to main
                 let totalRows: Int
-                if case .integer(let v) = result.value(row: 0, col: 0) { totalRows = Int(v) }
+                if result.rowCount > 0, case .integer(let v) = result.value(row: 0, col: 0) { totalRows = Int(v) }
                 else { totalRows = 0 }
 
                 let uniqueCount: Int
-                if case .integer(let v) = result.value(row: 0, col: 1) { uniqueCount = Int(v) }
+                if result.rowCount > 0, case .integer(let v) = result.value(row: 0, col: 1) { uniqueCount = Int(v) }
                 else { uniqueCount = 0 }
 
                 let nullCount: Int
-                if case .integer(let v) = result.value(row: 0, col: 2) { nullCount = Int(v) }
+                if result.rowCount > 0, case .integer(let v) = result.value(row: 0, col: 2) { nullCount = Int(v) }
                 else { nullCount = 0 }
 
                 let emptyCount: Int
-                if case .integer(let v) = result.value(row: 0, col: 3) { emptyCount = Int(v) }
+                if result.rowCount > 0, case .integer(let v) = result.value(row: 0, col: 3) { emptyCount = Int(v) }
                 else { emptyCount = 0 }
 
                 let stats = OverviewStats(
@@ -967,6 +960,7 @@ final class FileSession {
                     emptyCount: emptyCount
                 )
 
+                // Check generation on main thread only — profilerGeneration is main-thread-only
                 DispatchQueue.main.async {
                     guard self.profilerGeneration == generation else { return }
                     completion(.success(stats))

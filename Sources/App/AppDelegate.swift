@@ -695,6 +695,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         session.updateViewState(newState)
 
         tvc.updateFilterBar()
+        tvc.updateProfilerSidebar()
 
         let filterStartTime = CFAbsoluteTimeGetCurrent()
 
@@ -1286,6 +1287,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         var newState = session.viewState
         newState.searchTerm = term.isEmpty ? nil : term
         session.updateViewState(newState)
+
+        tvc.updateProfilerSidebar()
 
         let searchStartTime = CFAbsoluteTimeGetCurrent()
 
