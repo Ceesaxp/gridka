@@ -269,6 +269,7 @@ final class TableViewController: NSViewController {
         // Restore profiler sidebar visibility from persisted settings
         if SettingsManager.shared.profilerSidebarVisible {
             showProfilerSidebar(animated: false)
+            analysisBar.setFeatureActive(.profiler, active: true)
         }
     }
 

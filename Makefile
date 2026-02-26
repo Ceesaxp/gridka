@@ -1,7 +1,9 @@
 .PHONY: generate build test clean
 
+XCODEGEN ?= $(shell command -v xcodegen 2>/dev/null || echo /opt/homebrew/bin/xcodegen)
+
 generate:
-	/opt/homebrew/bin/xcodegen generate
+	$(XCODEGEN) generate
 
 build: generate
 	xcodebuild -scheme Gridka -configuration Debug build
