@@ -203,7 +203,7 @@
         "Compiles and runs without crashes"
       ],
       "priority": 12,
-      "passes": false,
+      "passes": true,
       "notes": "The bar chart can be a separate NSView in an NSSplitView with the table. Synchronize scrolling by observing NSScrollView.boundsDidChangeNotification on both scroll views. Bars should use the system accent color."
     },
     {

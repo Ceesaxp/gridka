@@ -5,7 +5,8 @@ import AppKit
 /// or profiler sidebar 'Show full frequency →' link.
 ///
 /// US-010: Container panel. US-011: Sortable frequency table with inline bars and bin toggle.
-final class FrequencyPanelController: NSWindowController, NSWindowDelegate {
+/// US-012: Horizontal bar chart alongside table with synchronized scrolling.
+final class FrequencyPanelController: NSWindowController, NSWindowDelegate, NSSplitViewDelegate {
 
     private static var shared: FrequencyPanelController?
 
@@ -71,7 +72,7 @@ final class FrequencyPanelController: NSWindowController, NSWindowDelegate {
         }
 
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 500, height: 400),
+            contentRect: NSRect(x: 0, y: 0, width: 650, height: 400),
             styleMask: [.titled, .closable, .resizable, .utilityWindow, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -135,9 +136,14 @@ final class FrequencyPanelController: NSWindowController, NSWindowDelegate {
 
     private var tableView: NSTableView!
     private var scrollView: NSScrollView!
+    private var splitView: NSSplitView!
+    private var chartView: FrequencyBarChartView!
+    private var chartScrollView: NSScrollView!
     private var statusLabel: NSTextField!
     private var binToggle: NSButton?
     private var spinner: NSProgressIndicator!
+    /// Guard against recursive scroll sync updates.
+    private var isSyncingScroll: Bool = false
 
     private let countFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -248,18 +254,91 @@ final class FrequencyPanelController: NSWindowController, NSWindowDelegate {
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(scrollView)
+
+        // --- Bar Chart View (right side) ---
+        chartView = FrequencyBarChartView(frame: .zero)
+        chartView.rowHeight = tableView.rowHeight + tableView.intercellSpacing.height
+        // Track the scroll view's width so bars resize when the split divider moves
+        chartView.autoresizingMask = [.width]
+
+        chartScrollView = NSScrollView()
+        chartScrollView.documentView = chartView
+        chartScrollView.hasVerticalScroller = false
+        chartScrollView.hasHorizontalScroller = false
+        chartScrollView.drawsBackground = false
+
+        // --- Split View (table left, chart right) ---
+        splitView = NSSplitView()
+        splitView.isVertical = true
+        splitView.dividerStyle = .thin
+        splitView.delegate = self
+        splitView.translatesAutoresizingMaskIntoConstraints = false
+        splitView.addArrangedSubview(scrollView)
+        splitView.addArrangedSubview(chartScrollView)
+        contentView.addSubview(splitView)
 
         NSLayoutConstraint.activate([
-            scrollView.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
-            scrollView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            splitView.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
+            splitView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            splitView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            splitView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
         ])
+
+        // Set initial split position (70% table, 30% chart)
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, let sv = self.splitView else { return }
+            let tableWidth = sv.bounds.width * 0.7
+            sv.setPosition(tableWidth, ofDividerAt: 0)
+        }
+
+        // --- Synchronized scrolling ---
+        scrollView.contentView.postsBoundsChangedNotifications = true
+        chartScrollView.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(tableScrollViewDidScroll(_:)),
+            name: NSView.boundsDidChangeNotification,
+            object: scrollView.contentView
+        )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(chartScrollViewDidScroll(_:)),
+            name: NSView.boundsDidChangeNotification,
+            object: chartScrollView.contentView
+        )
 
         // Set initial sort indicator
         updateSortIndicators()
+    }
+
+    // MARK: - Scroll Synchronization
+
+    @objc private func tableScrollViewDidScroll(_ notification: Notification) {
+        guard !isSyncingScroll else { return }
+        isSyncingScroll = true
+        let tableOrigin = scrollView.contentView.bounds.origin
+        chartScrollView.contentView.setBoundsOrigin(NSPoint(x: 0, y: tableOrigin.y))
+        chartScrollView.reflectScrolledClipView(chartScrollView.contentView)
+        isSyncingScroll = false
+    }
+
+    @objc private func chartScrollViewDidScroll(_ notification: Notification) {
+        guard !isSyncingScroll else { return }
+        isSyncingScroll = true
+        let chartOrigin = chartScrollView.contentView.bounds.origin
+        scrollView.contentView.setBoundsOrigin(NSPoint(x: scrollView.contentView.bounds.origin.x, y: chartOrigin.y))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+        isSyncingScroll = false
+    }
+
+    // MARK: - NSSplitViewDelegate
+
+    func splitView(_ sv: NSSplitView, constrainMinCoordinate proposedMinimumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
+        // Minimum table width: 200pt
+        return 200
+    }
+
+    func splitView(_ sv: NSSplitView, constrainMaxCoordinate proposedMaximumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
+        // Chart needs at least 80pt
+        return sv.bounds.width - 80
     }
 
     // MARK: - Data Loading
@@ -312,6 +391,7 @@ final class FrequencyPanelController: NSWindowController, NSWindowDelegate {
             allRows = []
             displayRows = []
             tableView.reloadData()
+            updateBarChart()
             statusLabel.stringValue = "Error: \(error.localizedDescription)"
         }
     }
@@ -337,6 +417,17 @@ final class FrequencyPanelController: NSWindowController, NSWindowDelegate {
             }
         }
         tableView.reloadData()
+        updateBarChart()
+    }
+
+    private func updateBarChart() {
+        let bars = displayRows.map { FrequencyBarChartView.Bar(value: $0.value, count: $0.count) }
+        // Match the table header height so bars align with table rows
+        chartView.headerOffset = tableView.headerView?.frame.height ?? 0
+        chartView.update(bars: bars, maxCount: cachedMaxCount)
+        // Resize the chart document view to match content height
+        let chartHeight = chartView.intrinsicContentSize.height
+        chartView.frame = NSRect(x: 0, y: 0, width: chartScrollView.contentView.bounds.width, height: max(chartHeight, chartScrollView.contentView.bounds.height))
     }
 
     private func updateSortIndicators() {
@@ -380,6 +471,9 @@ final class FrequencyPanelController: NSWindowController, NSWindowDelegate {
         if let frame = window?.frame {
             FrequencyPanelController.savedFrame = frame
         }
+        // Clean up scroll sync observers
+        NotificationCenter.default.removeObserver(self, name: NSView.boundsDidChangeNotification, object: scrollView?.contentView)
+        NotificationCenter.default.removeObserver(self, name: NSView.boundsDidChangeNotification, object: chartScrollView?.contentView)
         FrequencyPanelController.shared = nil
         FrequencyPanelController.onClose?()
     }

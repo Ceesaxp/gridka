@@ -1090,3 +1090,33 @@
   - The frequency panel does NOT use the profiler generation counter since it's a separate panel with its own lifecycle — stale results aren't an issue because the panel is recreated for each column
   - `NSSortDescriptor(key:ascending:)` stores the sort key and direction — the NSTableView manages toggling direction on repeated clicks
 ----
+
+## 2026-02-26 - US-012 - Frequency bar chart alongside table
+- Created `Sources/UI/FrequencyBarChartView.swift`: custom NSView subclass drawing horizontal bars with Core Graphics
+  - Each bar corresponds to a row in the frequency table, drawn proportional to count (largest = full width)
+  - Uses `isFlipped = true` for top-to-bottom drawing, `headerOffset` property aligns bars with table header height
+  - Bars drawn with system accent color at 0.6 alpha, rounded corners (3pt radius)
+  - `intrinsicContentSize` computed from bar count for proper scroll view content sizing
+  - Only draws bars within `dirtyRect` for efficient rendering with many rows
+- Modified `Sources/UI/FrequencyPanelController.swift`:
+  - Added NSSplitView (`splitView`) containing table scroll view (left) and chart scroll view (right)
+  - Split view uses `.thin` divider style with NSSplitViewDelegate constraints (min table: 200pt, min chart: 80pt)
+  - Initial split position: 70% table, 30% chart (set via `DispatchQueue.main.async` after layout)
+  - Synchronized scrolling via `NSView.boundsDidChangeNotification` on both clip views with `isSyncingScroll` guard to prevent recursive updates
+  - `updateBarChart()` method maps `displayRows` to chart bars, aligns `headerOffset` to table header height, and sizes chart document view to match content
+  - Chart updates on both `sortAndReload()` and error state (empty data)
+  - Panel default width increased from 500 to 650 to accommodate split layout
+  - Added `NSSplitViewDelegate` conformance with min/max coordinate constraints
+  - Scroll sync observers cleaned up in `windowWillClose`
+  - Chart view uses `autoresizingMask = [.width]` to track scroll view width on split divider moves
+- Files changed: Sources/UI/FrequencyBarChartView.swift (new), Sources/UI/FrequencyPanelController.swift, plans/prd.json
+- Build succeeds, all 64 tests pass
+- **Learnings for future iterations:**
+  - `NSView.boundsDidChangeNotification` on `scrollView.contentView` (the clip view) fires on scroll — must set `postsBoundsChangedNotifications = true` first
+  - Synchronized scrolling between two NSScrollViews requires a `isSyncingScroll` guard to prevent infinite recursion — setting one clip view's bounds triggers the other's notification
+  - `reflectScrolledClipView(_:)` must be called after `setBoundsOrigin` to update the scroll view's scrollers to match the new position
+  - NSSplitView with `addArrangedSubview` and Auto Layout constraints is cleaner than manual frame management for the split layout
+  - `DispatchQueue.main.async` for initial split position is needed because `splitView.bounds` is zero during `setupUI()` — the layout hasn't happened yet
+  - Chart document view height must be `max(contentHeight, clipViewHeight)` to prevent the chart from being smaller than the visible area when there are few rows
+  - `autoresizingMask = [.width]` on the chart view makes it automatically resize when the split divider moves, without needing explicit frame updates or notification observers
+----
