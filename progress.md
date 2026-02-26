@@ -1003,3 +1003,19 @@
   - The loading container (NSStackView) must be added to the main stack view instead of the label alone -- otherwise the spinner wouldn't be part of the layout
   - US-008 was mostly a "glue" story verifying that the individual profiler query implementations (US-004 through US-007) work together cohesively with proper batching, loading states, and cancellation
 ----
+
+## 2026-02-26 - US-009 - Add 'Value Frequency...' to column header context menu
+- Added "Value Frequency…" menu item to the column header right-click context menu in TableViewController
+  - Appears after existing items (Filter, Rename, Change Type, Delete), separated by NSMenuItem.separator()
+  - Uses same pattern as other menu items: `representedObject = columnName as NSString`, `target = self`
+- Added `onValueFrequency: ((String) -> Void)?` callback property on TableViewController for future wiring to FrequencyPanelController (US-010)
+- Added `@objc valueFrequencyClicked(_:)` action method that invokes the callback
+- Wired callback in AppDelegate: placeholder logs column name via `NSLog("Value Frequency requested for column: \(columnName)")`
+- Updated profiler's "Show full frequency →" link to route through the same `onValueFrequency` callback (previously had its own standalone NSLog), unifying the two trigger points
+- Files changed: Sources/UI/TableViewController.swift, Sources/App/AppDelegate.swift, plans/prd.json
+- Build succeeds, all 64 tests pass
+- **Learnings for future iterations:**
+  - The "Value Frequency…" menu item and the profiler's "Show full frequency →" link share the same `onValueFrequency` callback — when US-010 is implemented, wiring the callback once in AppDelegate will activate both trigger points
+  - The `_ = tvc` line in the AppDelegate callback suppresses the unused variable warning for the weak capture — the closure needs `[weak tvc]` for memory safety but only uses `columnName`
+  - US-009 is a pure UI-layer change — no model, engine, or query changes needed
+----

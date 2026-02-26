@@ -90,6 +90,9 @@ final class TableViewController: NSViewController {
     /// Called when a column is selected via header click. Parameter: columnName (nil to deselect).
     var onColumnSelected: ((String?) -> Void)?
 
+    /// Called when 'Value Frequency...' is selected in the header context menu. Parameter: columnName.
+    var onValueFrequency: ((String) -> Void)?
+
     /// Called when an analysis feature button is toggled. Parameters: (feature, isActive).
     var onAnalysisFeatureToggled: ((AnalysisFeature, Bool) -> Void)?
 
@@ -214,11 +217,11 @@ final class TableViewController: NSViewController {
             self.onFiltersChanged?(filters)
         }
 
-        // Wire "Show full frequency" link (placeholder — logs column name until US-010)
+        // Wire "Show full frequency" link — routes through onValueFrequency callback
         profilerSidebar.topValuesView.onShowFullFrequency = { [weak self] in
             guard let self = self, let session = self.fileSession,
                   let selectedCol = session.viewState.selectedColumn else { return }
-            NSLog("Show full frequency for column: \(selectedCol)")
+            self.onValueFrequency?(selectedCol)
         }
 
         // Inner split view: top = scroll view with table, bottom = detail pane
@@ -1697,6 +1700,14 @@ extension TableViewController: NSMenuDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
+        // Value Frequency option
+        let frequencyItem = NSMenuItem(title: "Value Frequency…", action: #selector(valueFrequencyClicked(_:)), keyEquivalent: "")
+        frequencyItem.target = self
+        frequencyItem.representedObject = columnName as NSString
+        menu.addItem(frequencyItem)
+
+        menu.addItem(NSMenuItem.separator())
+
         // Hide Column option (only if more than 1 column visible)
         if tableView.tableColumns.count > 1 {
             let hideItem = NSMenuItem(title: "Hide Column", action: #selector(hideColumnClicked(_:)), keyEquivalent: "")
@@ -1848,6 +1859,11 @@ extension TableViewController: NSMenuDelegate {
             guard response == .alertFirstButtonReturn else { return }
             self?.onColumnDeleted?(columnName)
         }
+    }
+
+    @objc private func valueFrequencyClicked(_ sender: NSMenuItem) {
+        guard let columnName = sender.representedObject as? String else { return }
+        onValueFrequency?(columnName)
     }
 
     @objc private func hideColumnClicked(_ sender: NSMenuItem) {

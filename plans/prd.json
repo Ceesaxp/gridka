@@ -153,7 +153,7 @@
         "Compiles and runs without crashes"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": "This is a small story that adds the menu item trigger point. The actual frequency panel is built in US-010. For now, clicking the item can just log or store the intent. Update the existing column header context menu builder."
     },
     {
