@@ -970,6 +970,9 @@ final class TableViewController: NSViewController {
 
         guard let session = fileSession else { return }
 
+        // Summary tabs are read-only — don't allow inline editing
+        guard !session.isSummarySession else { return }
+
         // Get the raw value for pre-populating the edit field
         let rawValue: String
         if let value = session.rowCache.value(forRow: row, columnName: columnName) {
