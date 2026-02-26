@@ -482,6 +482,9 @@ final class FrequencyPanelController: NSWindowController, NSWindowDelegate, NSSp
     // MARK: - NSWindowDelegate
 
     func windowWillClose(_ notification: Notification) {
+        // Cancel any pending delayed single-click action
+        pendingClickWorkItem?.cancel()
+        pendingClickWorkItem = nil
         // Save frame for position persistence within session
         if let frame = window?.frame {
             FrequencyPanelController.savedFrame = frame
