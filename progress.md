@@ -1135,7 +1135,9 @@
 - **Learnings for future iterations:**
   - The `FrequencyPanelController.onValueClicked`/`onValueDoubleClicked` callbacks and the `tableRowClicked`/`tableRowDoubleClicked` action methods were already scaffolded in US-011 — US-013 only needed to wire the callbacks to the filter infrastructure in AppDelegate
   - Static callbacks on FrequencyPanelController are wired once in `applicationDidFinishLaunching`, not per-TVC in `showTableView` — the panel is a singleton that operates across all tabs
-  - The `activeTab?.fileSession` lookup in the callback correctly gets the current tab's session at click time, not at callback registration time
+  - **Bug fix (review feedback):** The initial implementation used `activeTab?.fileSession` which targets the wrong tab when a different window is focused while the floating frequency panel is open. Fixed by passing the panel's own `fileSession` through the callback and looking up the owning tab via `tab(for: FileSession)`
+  - Changed callback signatures from `((String, String) -> Void)?` to `((String, String, FileSession) -> Void)?` so the panel passes its session
+  - Added `tab(for: FileSession)` helper on AppDelegate (matching existing `tab(for: TableViewController)` pattern)
+  - Created `applyFrequencyFilter(columnName:value:session:)` method that targets a specific session/TVC instead of relying on `handleFiltersChanged` which uses `activeTab`
   - The replace-existing-filter pattern (`removeAll` + `append`) prevents duplicate filter chips when clicking multiple values in the same column
-  - `handleFiltersChanged` already handles the entire pipeline: ViewState → cache invalidation → page 0 fetch → filter bar → status bar — no additional wiring needed
 ----
