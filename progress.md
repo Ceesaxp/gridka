@@ -854,3 +854,37 @@
   - `analysisBar.setFeatureActive(.profiler, active:)` syncs the toolbar button state without triggering the callback — prevents infinite toggle loops
   - ProfilerSidebarView uses frame-based layout in `layout()` override for the separator and scroll view positioning, matching the project's pattern of frame-based parent layout with Auto Layout internals
 ----
+
+## 2026-02-26 - US-004 - Show column overview stats in profiler
+- Created Sources/Engine/ProfilerQueryBuilder.swift: generates overview SQL queries for the profiler sidebar
+  - `buildOverviewQuery(columnName:viewState:columns:)` produces `SELECT COUNT(*), COUNT(DISTINCT col), COUNT(*) - COUNT(col), SUM(CASE WHEN CAST(col AS VARCHAR) = '' THEN 1 ELSE 0 END) FROM data WHERE ...`
+  - Uses QueryCoordinator's new `buildWhereSQL()` method to include current filter/search conditions
+- Added `buildWhereSQL(for:columns:)` public method to QueryCoordinator — thin wrapper exposing the existing private `buildWhereClause` for reuse by ProfilerQueryBuilder
+- Added profiler query infrastructure to FileSession:
+  - `profilerGeneration: Int` counter for discarding stale results when column selection changes rapidly
+  - `OverviewStats` struct with totalRows, uniqueCount, nullCount, emptyCount, and computed `completeness` property
+  - `invalidateProfilerQueries()` increments generation counter
+  - `fetchOverviewStats(columnName:completion:)` runs the overview SQL on the serial query queue, discards results if generation has advanced
+- Enhanced ProfilerSidebarView with overview stats section:
+  - 2×2 grid showing Rows, Unique, Nulls, Empty with monospaced digit values (16pt semibold) and titles (10pt secondary)
+  - Grid cells use rounded rect backgrounds (controlBackgroundColor) for visual grouping
+  - Completeness bar: track (separatorColor, 6pt height) with colored fill (green ≥90%, orange 50-89%, red <50%)
+  - Completeness label showing "N% complete" in monospaced digit font
+  - "OVERVIEW" section title in small semibold tertiary text
+  - Loading indicator ("Loading…") shown while queries are in flight
+  - `showColumn()` immediately shows header + loading state; `updateOverviewStats()` populates the grid
+- Added 200ms debounce to `updateProfilerSidebar()` in TableViewController:
+  - Uses DispatchWorkItem pattern (same as SearchBarView debounce)
+  - `profilerDebounceWorkItem` cancelled on each column change
+  - Header (name + type badge) updates immediately; stats load after debounce
+  - Stale results discarded via FileSession's generation counter
+- Files changed: Sources/Engine/ProfilerQueryBuilder.swift (new), Sources/Engine/QueryCoordinator.swift, Sources/Model/FileSession.swift, Sources/UI/ProfilerSidebarView.swift, Sources/UI/TableViewController.swift, plans/prd.json
+- Build succeeds, all 64 tests pass
+- **Learnings for future iterations:**
+  - QueryCoordinator's `buildWhereClause` was private — added a `buildWhereSQL` public wrapper rather than changing the original method's access level, keeping the internal API stable
+  - The generation counter pattern for discarding stale profiler results: increment on new column selection, check before dispatching results to main thread. Both the queryQueue callback and the main-thread dispatch check the generation to handle both timing scenarios
+  - ProfilerSidebarView's overview section uses Auto Layout internally within a container view that's added to the main NSStackView — this matches the project pattern of frame-based parent layout with Auto Layout internals
+  - `NSLayoutConstraint` multiplier-based fill width for the completeness bar works well — deactivate old constraint, create new one with updated multiplier, activate it. Must use `max(completeness, 0.001)` to avoid zero multiplier
+  - The `showColumn()` method resets the overview section to hidden and shows "Loading…" — this ensures the user sees fresh data, not stale stats from the previous column
+  - `NumberFormatter` with `.decimal` number style automatically adds grouping separators (e.g., "12,400") — cleaner than manual string formatting
+----

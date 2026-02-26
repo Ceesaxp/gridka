@@ -13,7 +13,12 @@ final class FileSession {
     private(set) var filePath: URL
     private let engine: DuckDBEngine
     private let queryCoordinator = QueryCoordinator()
+    private let profilerQueryBuilder = ProfilerQueryBuilder()
     private let queryQueue = DispatchQueue(label: "com.gridka.query-queue")
+
+    /// Generation counter for profiler queries. Incremented when column selection changes.
+    /// Results with a stale generation are discarded to prevent outdated data from appearing.
+    private var profilerGeneration: Int = 0
 
     private(set) var tableName: String = "data"
     private(set) var columns: [ColumnDescriptor] = []
@@ -884,6 +889,91 @@ final class FileSession {
                 }
             } catch {
                 DispatchQueue.main.async {
+                    completion(.failure(error))
+                }
+            }
+        }
+    }
+
+    // MARK: - Profiler Queries
+
+    /// Overview statistics for a column, displayed in the profiler sidebar.
+    struct OverviewStats {
+        let totalRows: Int
+        let uniqueCount: Int
+        let nullCount: Int
+        let emptyCount: Int
+
+        /// Percentage of non-null values (0.0–1.0).
+        var completeness: Double {
+            guard totalRows > 0 else { return 0 }
+            return Double(totalRows - nullCount) / Double(totalRows)
+        }
+    }
+
+    /// Increments the profiler generation counter, invalidating any in-flight profiler queries.
+    func invalidateProfilerQueries() {
+        profilerGeneration += 1
+    }
+
+    /// Fetches overview stats (rows, unique, nulls, empty) for the given column.
+    /// The completion handler is called on the main thread.
+    /// If a new column is selected before results arrive, stale results are discarded.
+    func fetchOverviewStats(columnName: String, completion: @escaping (Result<OverviewStats, Error>) -> Void) {
+        profilerGeneration += 1
+        let generation = profilerGeneration
+
+        let sql = profilerQueryBuilder.buildOverviewQuery(
+            columnName: columnName,
+            viewState: viewState,
+            columns: columns
+        )
+
+        queryQueue.async { [weak self] in
+            guard let self = self else { return }
+            do {
+                let result = try self.engine.execute(sql)
+
+                // Discard stale results if user selected a different column
+                guard self.profilerGeneration == generation else { return }
+
+                guard result.rowCount > 0 else {
+                    DispatchQueue.main.async {
+                        completion(.success(OverviewStats(totalRows: 0, uniqueCount: 0, nullCount: 0, emptyCount: 0)))
+                    }
+                    return
+                }
+
+                let totalRows: Int
+                if case .integer(let v) = result.value(row: 0, col: 0) { totalRows = Int(v) }
+                else { totalRows = 0 }
+
+                let uniqueCount: Int
+                if case .integer(let v) = result.value(row: 0, col: 1) { uniqueCount = Int(v) }
+                else { uniqueCount = 0 }
+
+                let nullCount: Int
+                if case .integer(let v) = result.value(row: 0, col: 2) { nullCount = Int(v) }
+                else { nullCount = 0 }
+
+                let emptyCount: Int
+                if case .integer(let v) = result.value(row: 0, col: 3) { emptyCount = Int(v) }
+                else { emptyCount = 0 }
+
+                let stats = OverviewStats(
+                    totalRows: totalRows,
+                    uniqueCount: uniqueCount,
+                    nullCount: nullCount,
+                    emptyCount: emptyCount
+                )
+
+                DispatchQueue.main.async {
+                    guard self.profilerGeneration == generation else { return }
+                    completion(.success(stats))
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    guard self.profilerGeneration == generation else { return }
                     completion(.failure(error))
                 }
             }

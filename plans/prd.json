@@ -70,7 +70,7 @@
         "Compiles and runs without crashes"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "This is the first profiler content section. Create a ProfilerQueryBuilder helper that generates the overview SQL from column name and ViewState (including current filters). The query must include WHERE clause from ViewState so profiler reflects filtered data."
     },
     {

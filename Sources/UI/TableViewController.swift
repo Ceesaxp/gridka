@@ -62,6 +62,9 @@ final class TableViewController: NSViewController {
     /// Whether the profiler sidebar is visible.
     private(set) var isProfilerVisible = false
 
+    /// Debounce work item for profiler queries when clicking rapidly between columns.
+    private var profilerDebounceWorkItem: DispatchWorkItem?
+
     /// Currently highlighted cell view for visual feedback.
     private weak var highlightedCellView: NSView?
 
@@ -662,15 +665,45 @@ final class TableViewController: NSViewController {
     }
 
     /// Updates profiler sidebar to reflect the currently selected column.
+    /// Triggers a debounced profiler query (200ms) to fetch overview stats.
     func updateProfilerSidebar() {
         guard isProfilerVisible else { return }
         guard let session = fileSession,
               let selectedCol = session.viewState.selectedColumn,
               let descriptor = session.columns.first(where: { $0.name == selectedCol }) else {
             profilerSidebar.showPlaceholder()
+            // Cancel any pending profiler queries
+            profilerDebounceWorkItem?.cancel()
+            fileSession?.invalidateProfilerQueries()
             return
         }
+
+        // Update header immediately
         profilerSidebar.showColumn(name: descriptor.name, typeName: duckDBTypeName(for: descriptor))
+
+        // Debounce the profiler query at 200ms to handle rapid column switching
+        profilerDebounceWorkItem?.cancel()
+        let columnName = selectedCol
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self = self, let session = self.fileSession else { return }
+            session.fetchOverviewStats(columnName: columnName) { [weak self] result in
+                guard let self = self else { return }
+                switch result {
+                case .success(let stats):
+                    self.profilerSidebar.updateOverviewStats(
+                        totalRows: stats.totalRows,
+                        uniqueCount: stats.uniqueCount,
+                        nullCount: stats.nullCount,
+                        emptyCount: stats.emptyCount
+                    )
+                case .failure:
+                    // Query failed — keep loading state (may have been cancelled)
+                    break
+                }
+            }
+        }
+        profilerDebounceWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: workItem)
     }
 
     func updateDetailPane() {

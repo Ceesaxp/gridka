@@ -51,6 +51,13 @@ final class QueryCoordinator {
         return result
     }
 
+    /// Builds just the WHERE clause (without the "WHERE" keyword) from the current ViewState.
+    /// Returns an empty string if no conditions apply. Used by ProfilerQueryBuilder to include
+    /// the same filter/search conditions in profiler queries.
+    func buildWhereSQL(for state: ViewState, columns: [ColumnDescriptor]) -> String {
+        return buildWhereClause(for: state, columns: columns)
+    }
+
     // MARK: - Private Builders
 
     private func buildWhereClause(for state: ViewState, columns: [ColumnDescriptor]) -> String {
