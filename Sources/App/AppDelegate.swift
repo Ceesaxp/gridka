@@ -37,6 +37,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         return windowTabs.values.first(where: { $0.tableViewController === tvc })
     }
 
+    private func tab(for session: FileSession) -> TabContext? {
+        return windowTabs.values.first(where: { $0.fileSession === session })
+    }
+
     // MARK: - Memory Rebalancing
 
     /// Rebalances DuckDB memory limits across all open tabs.
@@ -71,23 +75,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
         // US-013: Click-to-filter from frequency view
         // Single-click a value → add filter (column = value), panel stays open
-        FrequencyPanelController.onValueClicked = { [weak self] columnName, value in
-            guard let self = self,
-                  let session = self.activeTab?.fileSession else { return }
-            var filters = session.viewState.filters
-            filters.removeAll { $0.column == columnName }
-            filters.append(ColumnFilter(column: columnName, operator: .equals, value: .string(value)))
-            self.handleFiltersChanged(filters)
+        FrequencyPanelController.onValueClicked = { [weak self] columnName, value, session in
+            self?.applyFrequencyFilter(columnName: columnName, value: value, session: session)
         }
 
         // Double-click a value → add filter AND close the frequency panel
-        FrequencyPanelController.onValueDoubleClicked = { [weak self] columnName, value in
-            guard let self = self,
-                  let session = self.activeTab?.fileSession else { return }
-            var filters = session.viewState.filters
-            filters.removeAll { $0.column == columnName }
-            filters.append(ColumnFilter(column: columnName, operator: .equals, value: .string(value)))
-            self.handleFiltersChanged(filters)
+        FrequencyPanelController.onValueDoubleClicked = { [weak self] columnName, value, session in
+            self?.applyFrequencyFilter(columnName: columnName, value: value, session: session)
             FrequencyPanelController.closeIfOpen()
         }
 
@@ -723,6 +717,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
 
     // MARK: - Filter Handling
+
+    /// Applies an equals filter from the frequency panel to the panel's owning session.
+    /// Uses the session passed from the panel (not activeTab) to target the correct tab.
+    private func applyFrequencyFilter(columnName: String, value: String, session: FileSession) {
+        guard let tab = tab(for: session), let tvc = tab.tableViewController else { return }
+        var filters = session.viewState.filters
+        filters.removeAll { $0.column == columnName }
+        filters.append(ColumnFilter(column: columnName, operator: .equals, value: .string(value)))
+
+        var newState = session.viewState
+        newState.filters = filters
+        session.updateViewState(newState)
+
+        tvc.updateFilterBar()
+        tvc.updateProfilerSidebar()
+
+        let filterStartTime = CFAbsoluteTimeGetCurrent()
+
+        session.fetchPage(index: 0) { result in
+            let filterTime = CFAbsoluteTimeGetCurrent() - filterStartTime
+
+            switch result {
+            case .success:
+                tvc.reloadVisibleRows()
+                tvc.statusBar.showQueryTime(filterTime)
+            case .failure:
+                break
+            }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                let filtered = session.viewState.totalFilteredRows
+                let total = session.totalRows
+                tvc.statusBar.updateRowCount(showing: filtered, total: total)
+            }
+        }
+
+        tvc.reloadVisibleRows()
+    }
 
     private func handleFiltersChanged(_ filters: [ColumnFilter]) {
         guard let session = activeTab?.fileSession, let tvc = activeTab?.tableViewController else { return }

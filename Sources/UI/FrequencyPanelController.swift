@@ -14,11 +14,11 @@ final class FrequencyPanelController: NSWindowController, NSWindowDelegate, NSSp
     /// Used to sync toolbar button state.
     static var onClose: (() -> Void)?
 
-    /// Called when user clicks a value row (single-click). Parameter: value string.
-    static var onValueClicked: ((String, String) -> Void)?
+    /// Called when user clicks a value row (single-click). Parameters: (column, value, fileSession).
+    static var onValueClicked: ((String, String, FileSession) -> Void)?
 
-    /// Called when user double-clicks a value row (filter + close). Parameter: (column, value).
-    static var onValueDoubleClicked: ((String, String) -> Void)?
+    /// Called when user double-clicks a value row (filter + close). Parameters: (column, value, fileSession).
+    static var onValueDoubleClicked: ((String, String, FileSession) -> Void)?
 
     private let columnName: String
     private weak var fileSession: FileSession?
@@ -452,16 +452,18 @@ final class FrequencyPanelController: NSWindowController, NSWindowDelegate, NSSp
 
     @objc private func tableRowClicked() {
         let row = tableView.clickedRow
-        guard row >= 0, row < displayRows.count, !isBinned else { return }
+        guard row >= 0, row < displayRows.count, !isBinned,
+              let session = fileSession else { return }
         let value = displayRows[row].value
-        FrequencyPanelController.onValueClicked?(columnName, value)
+        FrequencyPanelController.onValueClicked?(columnName, value, session)
     }
 
     @objc private func tableRowDoubleClicked() {
         let row = tableView.clickedRow
-        guard row >= 0, row < displayRows.count, !isBinned else { return }
+        guard row >= 0, row < displayRows.count, !isBinned,
+              let session = fileSession else { return }
         let value = displayRows[row].value
-        FrequencyPanelController.onValueDoubleClicked?(columnName, value)
+        FrequencyPanelController.onValueDoubleClicked?(columnName, value, session)
     }
 
     // MARK: - NSWindowDelegate
