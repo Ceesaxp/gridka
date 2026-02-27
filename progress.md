@@ -1761,3 +1761,25 @@
   - `FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first` is practically never nil on macOS, but the force unwrap was a code quality issue worth fixing
   - FileSession's cache directory usage is in a queryQueue closure with try/catch, so a guard-let with early return + completion(.failure) is the correct pattern there (not throw)
 ----
+
+## 2026-02-27, 15:18 - US-009 - Add bounds-safe DuckDBResult accessors
+- Added bounds guards to all three DuckDBResult accessor methods in DuckDBEngine.swift:
+  - `columnName(at:)`: returns `""` for negative or out-of-range column index
+  - `columnType(at:)`: returns `.unknown` for negative or out-of-range column index
+  - `value(row:col:)`: returns `.null` for negative/out-of-range row or column
+- All guards check `>= 0` and `< count` before converting `Int` to `idx_t`, preventing wraparound of negative values to huge unsigned values in C API
+- Created Tests/DuckDBResultBoundsTests.swift with 15 test cases covering:
+  - Negative indices for columnName, columnType, and value
+  - Out-of-range indices for all three accessors
+  - Both row and column out of range simultaneously
+  - Empty result (zero rows) access safety
+  - Int.max and Int.min extreme edge cases
+  - Valid access still returning correct values (regression guard)
+- Files changed: Sources/Engine/DuckDBEngine.swift, Tests/DuckDBResultBoundsTests.swift (new), plans/prd.json, Gridka.xcodeproj/project.pbxproj
+- Build succeeds, all 159 unit tests pass (15 new + 144 existing)
+- **Learnings for future iterations:**
+  - The DuckDB deprecated `duckdb_value_*` functions don't crash on out-of-bounds — they return zeros/nulls — but relying on that is undefined behavior in the C API
+  - `idx_t` is `UInt64` so a negative `Int` like `-1` becomes `18446744073709551615` when converted — the bounds guard before conversion is critical
+  - The existing callers already guard most access with `result.rowCount > 0` checks, but defense-in-depth at the accessor level catches any edge case
+  - Each test creates its own DuckDBEngine + table, so tests are fully isolated
+----
