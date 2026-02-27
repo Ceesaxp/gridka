@@ -544,7 +544,10 @@ final class TableViewController: NSViewController {
     }
 
     func reloadRows(_ rows: IndexSet, columns: IndexSet) {
-        tableView.reloadData(forRowIndexes: rows, columnIndexes: columns)
+        let currentRowCount = tableView.numberOfRows
+        let clamped = rows.filteredIndexSet(includeInteger: { $0 < currentRowCount })
+        guard !clamped.isEmpty else { return }
+        tableView.reloadData(forRowIndexes: clamped, columnIndexes: columns)
     }
 
     // MARK: - Sort Indicator Updates
@@ -1739,9 +1742,15 @@ final class TableViewController: NSViewController {
 
             switch result {
             case .success(let page):
+                let currentRowCount = self.tableView.numberOfRows
                 let startRow = page.startRow
-                let endRow = startRow + page.data.count
-                let rowRange = IndexSet(integersIn: startRow..<endRow)
+                let clampedEnd = min(startRow + page.data.count, currentRowCount)
+
+                // Skip reload entirely if page is outside current row bounds
+                // (stale fetch from before a filter/search reduced the row count)
+                guard startRow < currentRowCount, startRow < clampedEnd else { break }
+
+                let rowRange = IndexSet(integersIn: startRow..<clampedEnd)
                 let colRange = IndexSet(integersIn: 0..<self.tableView.numberOfColumns)
                 self.tableView.reloadData(forRowIndexes: rowRange, columnIndexes: colRange)
             case .failure:

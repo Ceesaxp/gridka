@@ -1699,3 +1699,28 @@
   - `os_unfair_lock` must be stored as a `var` (not `let`) because `os_unfair_lock_lock` takes `inout` pointer
   - The final `DispatchQueue.main.async` dispatch for storing results (line 1333) is NOT a deadlock risk — it's async, not sync — and still benefits from the lock-protected generation check
 ----
+
+## 2026-02-27, 14:55 - US-006 - Clamp table reload ranges for stale/changed page results
+- Added row index clamping in `requestPageFetch` completion handler (TableViewController.swift lines 1740-1752):
+  - Computes `currentRowCount` from `tableView.numberOfRows` before building reload range
+  - Clamps `endRow` to `min(startRow + page.data.count, currentRowCount)`
+  - Skips reload entirely when `startRow >= currentRowCount` (page fully outside bounds)
+  - Skips reload when `startRow >= clampedEnd` (empty range after clamping)
+- Added defense-in-depth clamping to `reloadRows(_:columns:)` helper (line 546-550):
+  - Filters row IndexSet to only include indices below `tableView.numberOfRows`
+  - Returns early if the clamped set is empty
+- Created Tests/StaleReloadClampTests.swift with 4 regression tests:
+  - `testStaleFetchReturnsPageBeyondNewRowCount` — proves the staleness scenario: fetch enqueued before filter, filter reduces row count, stale page's row range exceeds new count
+  - `testStaleFetchWithEmptyPageIsHarmless` — page far beyond actual data returns 0 rows safely
+  - `testBurstStalesFetchesAllComplete` — 10 concurrent fetches followed by filter change all complete without crash/deadlock
+  - `testStaleGenerationFetchSkipsCacheInsert` — stale generation fetch returns .success but page is NOT cached
+- Regenerated Gridka.xcodeproj via xcodegen
+- Files changed: Sources/UI/TableViewController.swift, Tests/StaleReloadClampTests.swift (new), Gridka.xcodeproj/project.pbxproj (regen), plans/prd.json
+- Build succeeds, all 144 unit tests pass (4 new + 140 existing)
+- **Learnings for future iterations:**
+  - `rowCache` is `private(set)` on FileSession — tests cannot call `invalidateAll()` directly; use `updateViewState()` to trigger cache invalidation instead
+  - The staleness scenario is real: `fetchPage` always calls completion with `.success` even for stale generations (for `fetchingPages` bookkeeping), so the page data can have row ranges far outside the current table bounds
+  - `tableView.numberOfRows` reflects the value from the data source delegate (`totalFilteredRows`), which is updated asynchronously by `requeryCount()` — so there's a window where the table's reported row count has already shrunk but stale fetch completions still arrive
+  - `filteredIndexSet(includeInteger:)` is the idiomatic Swift way to clamp an IndexSet to a range
+  - Defense-in-depth: clamping in both `requestPageFetch` (specific) and `reloadRows` (general helper) ensures no path can trigger out-of-bounds NSTableView reloads
+----
