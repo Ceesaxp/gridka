@@ -21,6 +21,9 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
+      - name: Download DuckDB library
+        run: ./Libraries/download-duckdb.sh
+
       - name: Generate Xcode project
         run: xcodegen generate
 
