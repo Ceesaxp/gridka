@@ -103,9 +103,13 @@ final class FileSessionShutdownTests: XCTestCase {
         onMain {
             session.shutdown()
             session.loadFull(progress: { _ in }) { result in
-                // Completion fires but with failure
-                if case .failure = result {
-                    // Expected: session shut down
+                // Completion fires with the dedicated cancellation error
+                if case .failure(let error) = result,
+                   let gridkaError = error as? GridkaError,
+                   case .sessionShutDown = gridkaError {
+                    // Expected: clean cancellation, not a user-visible error
+                } else if case .success = result {
+                    XCTFail("loadFull should not succeed after shutdown")
                 }
                 loadDone.fulfill()
             }
@@ -131,8 +135,10 @@ final class FileSessionShutdownTests: XCTestCase {
         onMain {
             session.shutdown()
             session.addRow { result in
-                if case .failure = result {
-                    // Expected: session shut down
+                if case .failure(let error) = result,
+                   let gridkaError = error as? GridkaError,
+                   case .sessionShutDown = gridkaError {
+                    // Expected: clean cancellation
                 }
                 done.fulfill()
             }
@@ -162,8 +168,10 @@ final class FileSessionShutdownTests: XCTestCase {
         onMain {
             session.shutdown()
             session.updateCell(rowid: 1, column: colName, value: "test", displayRow: 0) { result in
-                if case .failure = result {
-                    // Expected: session shut down
+                if case .failure(let error) = result,
+                   let gridkaError = error as? GridkaError,
+                   case .sessionShutDown = gridkaError {
+                    // Expected: clean cancellation
                 }
                 done.fulfill()
             }

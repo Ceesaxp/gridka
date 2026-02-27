@@ -1786,6 +1786,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     // MARK: - Error Handling
 
     private func showError(_ error: Error, context: String) {
+        // Silently ignore shutdown cancellation — not a user-visible error. (US-004)
+        if let gridkaError = error as? GridkaError, case .sessionShutDown = gridkaError { return }
+
         let alert = NSAlert()
         alert.messageText = "Error \(context)"
         alert.informativeText = error.localizedDescription

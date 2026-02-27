@@ -373,7 +373,7 @@ final class FileSession {
 
                 DispatchQueue.main.async {
                     guard !self.isShutDown else {
-                        completion(.failure(GridkaError.queryFailed("Session shut down")))
+                        completion(.failure(GridkaError.sessionShutDown))
                         return
                     }
                     self.columns = cols
@@ -430,7 +430,7 @@ final class FileSession {
 
                 DispatchQueue.main.async {
                     guard !self.isShutDown else {
-                        completion(.failure(GridkaError.queryFailed("Session shut down")))
+                        completion(.failure(GridkaError.sessionShutDown))
                         return
                     }
                     self.columns = cols
@@ -577,7 +577,7 @@ final class FileSession {
 
                 DispatchQueue.main.async {
                     guard !self.isShutDown else {
-                        completion(.failure(GridkaError.queryFailed("Session shut down")))
+                        completion(.failure(GridkaError.sessionShutDown))
                         return
                     }
                     self.columns = cols
@@ -635,7 +635,7 @@ final class FileSession {
 
                 DispatchQueue.main.async {
                     guard !self.isShutDown else {
-                        completion(.failure(GridkaError.queryFailed("Session shut down")))
+                        completion(.failure(GridkaError.sessionShutDown))
                         return
                     }
                     self.columns = cols
@@ -917,7 +917,7 @@ final class FileSession {
 
                 DispatchQueue.main.async {
                     guard !self.isShutDown else {
-                        completion(.failure(GridkaError.queryFailed("Session shut down")))
+                        completion(.failure(GridkaError.sessionShutDown))
                         return
                     }
                     self.columns = cols
@@ -954,7 +954,7 @@ final class FileSession {
 
                 DispatchQueue.main.async {
                     guard !self.isShutDown else {
-                        completion(.failure(GridkaError.queryFailed("Session shut down")))
+                        completion(.failure(GridkaError.sessionShutDown))
                         return
                     }
                     self.columns = cols
@@ -1056,7 +1056,7 @@ final class FileSession {
 
                 DispatchQueue.main.async {
                     guard !self.isShutDown else {
-                        completion(.failure(GridkaError.queryFailed("Session shut down")))
+                        completion(.failure(GridkaError.sessionShutDown))
                         return
                     }
                     self.columns = cols
@@ -1092,7 +1092,7 @@ final class FileSession {
 
                 DispatchQueue.main.async {
                     guard !self.isShutDown else {
-                        completion(.failure(GridkaError.queryFailed("Session shut down")))
+                        completion(.failure(GridkaError.sessionShutDown))
                         return
                     }
                     self.columns = cols
@@ -1147,7 +1147,7 @@ final class FileSession {
 
                 DispatchQueue.main.async {
                     guard !self.isShutDown else {
-                        completion(.failure(GridkaError.queryFailed("Session shut down")))
+                        completion(.failure(GridkaError.sessionShutDown))
                         return
                     }
                     self.totalRows += 1
@@ -1191,7 +1191,7 @@ final class FileSession {
 
                 DispatchQueue.main.async {
                     guard !self.isShutDown else {
-                        completion(.failure(GridkaError.queryFailed("Session shut down")))
+                        completion(.failure(GridkaError.sessionShutDown))
                         return
                     }
                     self.totalRows = newTotal
@@ -1437,7 +1437,7 @@ final class FileSession {
                 try self.engine.execute(sql)
                 DispatchQueue.main.async {
                     guard !self.isShutDown else {
-                        completion(.failure(GridkaError.queryFailed("Session shut down")))
+                        completion(.failure(GridkaError.sessionShutDown))
                         return
                     }
                     self.rowCache.invalidatePage(pageIndex)

@@ -1666,3 +1666,17 @@
   - The `RowCache.pages` dictionary is private, so tests verify cache state indirectly via `value(forRow:columnName:)` returning nil
   - UI test `testCloseTabAfterNavigationStressWithTwoFiles` has a pre-existing flaky timeout unrelated to this change
 ----
+
+## 2026-02-27, 14:25 - US-004 - Treat shutdown as cancellation, not operation error (review fix)
+- Code review identified that returning `GridkaError.queryFailed("Session shut down")` from shutdown guards would cause callers in AppDelegate to call `showError()`, producing spurious alert dialogs during normal tab close
+- Added `GridkaError.sessionShutDown` case to GridkaError enum as a dedicated cancellation sentinel
+- Replaced all 11 instances of `GridkaError.queryFailed("Session shut down")` with `GridkaError.sessionShutDown`
+- Added early-return in `AppDelegate.showError()` that silently ignores `.sessionShutDown` errors
+- Updated tests to verify the specific `GridkaError.sessionShutDown` error type
+- Files changed: Sources/Engine/GridkaError.swift, Sources/Model/FileSession.swift, Sources/App/AppDelegate.swift, Tests/FileSessionShutdownTests.swift
+- Build succeeds, all 139 unit tests pass
+- **Learnings for future iterations:**
+  - Shutdown/cancellation errors should NEVER use generic error cases like `.queryFailed` — they need a distinct case so UI layers can filter them out
+  - Always trace the error path through to the UI: if a completion returns `.failure`, check what the caller does with that failure
+  - The `showError` guard is a single chokepoint — all error-displaying paths go through it, so one guard covers all callers
+----
