@@ -5,6 +5,37 @@ All notable changes to Gridka will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-02-27
+
+### Security
+- Unified computed-expression validator — rejects multi-statement SQL payloads while allowing semicolons inside string literals
+
+### Fixed
+- SparklineHeaderCell teardown crash during tab/window close (4 crash signatures resolved)
+- FileSession shutdown guards — async callbacks safely no-op when session is deallocated
+- Deadlock from `DispatchQueue.main.sync` in summary computation replaced with non-blocking atomic check
+- Stale page reload clamping — out-of-bounds row indexes from stale fetch callbacks safely ignored
+- Queue ownership enforcement — main-thread config snapshotted before dispatch to queryQueue
+- DuckDB engine lifecycle — force unwraps replaced with guarded error handling
+- Bounds-safe DuckDB result accessors — row/column index validation before C API calls
+- Summary counter synchronization — atomic counter prevents temp table name collisions
+
+### Added
+- 78 new crash-focused regression tests (teardown, shutdown, concurrency, reload clamping, injection)
+- 172 total unit tests
+
+## [1.1.0] - 2026-02-27
+
+### Added
+- Save group-by summary results to CSV via File > Save As
+- Close prompt for summary tabs — warns before discarding group-by results
+- Toggle sparklines on/off in Settings
+
+### Fixed
+- SparklineHeaderCell crash from NSCopyObject bitwise copy of Swift stored properties
+- Silent save failures from `[weak self]` in async closures
+- Sandbox entitlement changed from read-only to read-write for user-selected files
+
 ## [0.6] - 2026-02-27
 
 ### Added

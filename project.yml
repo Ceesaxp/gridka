@@ -29,8 +29,8 @@ targets:
         INFOPLIST_FILE: Resources/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_ENTITLEMENTS: Gridka.entitlements
-        MARKETING_VERSION: "1.0.0"
-        CURRENT_PROJECT_VERSION: "1"
+        MARKETING_VERSION: "1.2.0"
+        CURRENT_PROJECT_VERSION: "5"
         SWIFT_OBJC_BRIDGING_HEADER: Sources/Bridging/Gridka-Bridging-Header.h
         HEADER_SEARCH_PATHS:
           - "$(PROJECT_DIR)/Libraries"
@@ -68,8 +68,8 @@ targets:
         PRODUCT_NAME: GridkaQuickLook
         CODE_SIGN_ENTITLEMENTS: GridkaQuickLook.entitlements
         INFOPLIST_FILE: QuickLookExtension/Info.plist
-        MARKETING_VERSION: "1.0.0"
-        CURRENT_PROJECT_VERSION: "1"
+        MARKETING_VERSION: "1.2.0"
+        CURRENT_PROJECT_VERSION: "5"
         SKIP_INSTALL: YES
   GridkaTests:
     type: bundle.unit-test
