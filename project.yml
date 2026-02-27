@@ -1,6 +1,6 @@
 name: Gridka
 options:
-  bundleIdPrefix: com.gridka
+  bundleIdPrefix: org.ceesaxp.gridka
   deploymentTarget:
     macOS: "14.0"
   xcodeVersion: "15.0"
@@ -80,9 +80,21 @@ targets:
       - target: Gridka
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.gridka.app.tests
+        PRODUCT_BUNDLE_IDENTIFIER: org.ceesaxp.gridka.app.tests
         GENERATE_INFOPLIST_FILE: YES
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Gridka.app/Contents/MacOS/Gridka"
         BUNDLE_LOADER: "$(TEST_HOST)"
         HEADER_SEARCH_PATHS:
           - "$(PROJECT_DIR)/Libraries"
+  GridkaUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: UITests
+    dependencies:
+      - target: Gridka
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.ceesaxp.gridka.app.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Gridka

@@ -118,6 +118,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             showEmptyState(in: win, tab: tab)
             win.makeKeyAndOrderFront(nil)
         }
+
+        handleUITestAutoOpenIfNeeded()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -372,6 +374,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
         NSApp.mainMenu = mainMenu
         NSApp.windowsMenu = windowMenu
+    }
+
+    // MARK: - UI Test Hooks
+
+    /// UI tests can provide files to open on launch via environment variables:
+    /// - GRIDKA_UI_TEST_FILE: single absolute path
+    /// - GRIDKA_UI_TEST_FILES: multiple absolute paths joined by "::"
+    /// This avoids automating NSSave/NOpen panels in XCUITest.
+    private func handleUITestAutoOpenIfNeeded() {
+        let env = ProcessInfo.processInfo.environment
+        guard env["GRIDKA_UI_TEST_MODE"] == "1" else { return }
+
+        var paths: [String] = []
+        if let many = env["GRIDKA_UI_TEST_FILES"], !many.isEmpty {
+            paths = many.components(separatedBy: "::").filter { !$0.isEmpty }
+        } else if let single = env["GRIDKA_UI_TEST_FILE"], !single.isEmpty {
+            paths = [single]
+        }
+        guard !paths.isEmpty else { return }
+
+        // Wait one runloop turn so the initial empty tab window is fully ready.
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            for path in paths where FileManager.default.fileExists(atPath: path) {
+                _ = self.application(NSApp, openFile: path)
+            }
+        }
     }
 
     // MARK: - New Tab

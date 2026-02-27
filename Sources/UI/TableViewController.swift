@@ -168,6 +168,7 @@ final class TableViewController: NSViewController {
         tableView.intercellSpacing = NSSize(width: 8, height: 2)
         tableView.dataSource = self
         tableView.delegate = self
+        tableView.setAccessibilityIdentifier("mainTableView")
 
         // Custom header view for double-click auto-fit
         let customHeader = AutoFitTableHeaderView(tableViewController: self)
@@ -194,6 +195,7 @@ final class TableViewController: NSViewController {
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = true
         scrollView.autohidesScrollers = true
+        scrollView.setAccessibilityIdentifier("mainTableScrollView")
 
         filterBar = FilterBarView()
         filterBar.onFilterRemoved = { [weak self] removedFilter in
@@ -2418,6 +2420,8 @@ final class RowNumberView: NSView {
 
 // MARK: - Previewer
 
+#if false
 #Preview {
     TableViewController()
 }
+#endif
