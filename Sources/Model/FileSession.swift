@@ -15,11 +15,15 @@ final class FileSession {
     // FileSession uses two execution contexts:
     //
     //   • **Main thread** — owns ALL mutable state: viewState, rowCache,
-    //     columns, totalRows, isFullyLoaded, generation counters,
+    //     columns, totalRows, isFullyLoaded, most generation counters,
     //     columnSummaries, editedCells, isModified, and configuration
     //     properties (hasHeaders, customDelimiter, overrideEncoding, etc.).
     //     Every public method that reads or writes these properties MUST be
     //     called on the main thread.
+    //
+    //   • **Exception:** `summaryGeneration` is protected by an
+    //     os_unfair_lock so queryQueue can check it without blocking main.
+    //     Writes still happen on main; the lock provides cross-thread visibility.
     //
     //   • **queryQueue** (serial) — owns DuckDB engine access. All SQL
     //     execution happens here. Closures dispatched to queryQueue must
@@ -50,8 +54,24 @@ final class FileSession {
 
     /// Generation counter for column summary computation. Incremented when summaries are
     /// invalidated (data mutations, reload). Prevents stale summary results from being stored.
-    /// Main-thread only.
-    private var summaryGeneration: Int = 0
+    /// Protected by `_summaryGenLock` so queryQueue can read it without blocking main.
+    private var _summaryGeneration: Int = 0
+    private var _summaryGenLock = os_unfair_lock()
+
+    /// Thread-safe read of the summary generation counter.
+    private var summaryGeneration: Int {
+        get {
+            os_unfair_lock_lock(&_summaryGenLock)
+            let val = _summaryGeneration
+            os_unfair_lock_unlock(&_summaryGenLock)
+            return val
+        }
+        set {
+            os_unfair_lock_lock(&_summaryGenLock)
+            _summaryGeneration = newValue
+            os_unfair_lock_unlock(&_summaryGenLock)
+        }
+    }
 
     /// Cached column summaries keyed by column name. Computed once after full file load.
     /// Invalidated when underlying data changes (cell edit, row delete, column add/delete, reload).
@@ -1269,23 +1289,17 @@ final class FileSession {
                 return
             }
 
-            // Check generation before proceeding to per-column distribution queries
-            var earlyAbort = false
-            DispatchQueue.main.sync {
-                if self.summaryGeneration != generation { earlyAbort = true }
-            }
-            if earlyAbort { return }
+            // Check generation before proceeding to per-column distribution queries.
+            // summaryGeneration is protected by os_unfair_lock, so this read is safe
+            // from queryQueue without blocking main (eliminates deadlock risk).
+            if self.summaryGeneration != generation { return }
 
             // Step 2: Per-column distribution queries
             var summaries: [String: ColumnSummary] = [:]
 
             for col in currentColumns {
-                // Check generation before each column query
-                var shouldAbort = false
-                DispatchQueue.main.sync {
-                    if self.summaryGeneration != generation { shouldAbort = true }
-                }
-                if shouldAbort { return }
+                // Check generation before each column query (lock-protected, no main-thread sync)
+                if self.summaryGeneration != generation { return }
 
                 let card = cardinalityMap[col.name] ?? (distinct: 0, nulls: 0)
                 let displayType = self.mapDisplayType(from: col.duckDBType)

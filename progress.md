@@ -1680,3 +1680,22 @@
   - Always trace the error path through to the UI: if a completion returns `.failure`, check what the caller does with that failure
   - The `showError` guard is a single chokepoint — all error-displaying paths go through it, so one guard covers all callers
 ----
+
+## 2026-02-27, 14:45 - US-005 - Eliminate main-thread sync wait from summary computation
+- Replaced `DispatchQueue.main.sync` generation counter checks in `computeColumnSummaries` with direct lock-protected reads
+- Added `os_unfair_lock`-protected computed property for `summaryGeneration`:
+  - Backing store `_summaryGeneration: Int` with `_summaryGenLock: os_unfair_lock`
+  - Computed property `summaryGeneration` with lock-guarded get/set
+  - Reads from queryQueue are now non-blocking — no more synchronous dispatch to main thread
+- Removed 2 `DispatchQueue.main.sync` calls from `computeColumnSummaries()` (lines 1274 and 1285)
+- Updated thread ownership documentation comment to note the `summaryGeneration` exception
+- Stale result discard behavior preserved: generation checks still happen at the same points, just via lock read instead of main.sync
+- Files changed: Sources/Model/FileSession.swift, plans/prd.json
+- Build succeeds, all 140 unit tests + 4 UI tests pass
+- **Learnings for future iterations:**
+  - `os_unfair_lock` is the lightest-weight synchronization primitive on macOS — perfect for protecting a single Int counter
+  - The `DispatchQueue.main.sync` from queryQueue pattern was originally "safe" because main never synchronously waited on queryQueue, but this is fragile — if any future code adds a sync wait in the other direction, instant deadlock
+  - The lock-based approach is strictly better: same semantics (immediate visibility of generation bump), zero deadlock risk, negligible overhead
+  - `os_unfair_lock` must be stored as a `var` (not `let`) because `os_unfair_lock_lock` takes `inout` pointer
+  - The final `DispatchQueue.main.async` dispatch for storing results (line 1333) is NOT a deadlock risk — it's async, not sync — and still benefits from the lock-protected generation check
+----
