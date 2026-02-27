@@ -137,7 +137,7 @@
         "Tests pass"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": "Targets C-interop safety findings in result accessor methods."
     },
     {

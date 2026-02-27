@@ -20,6 +20,7 @@ final class DuckDBResult {
     }
 
     func columnName(at index: Int) -> String {
+        guard index >= 0, index < columnCount else { return "" }
         guard let cString = duckdb_column_name(&result, idx_t(index)) else {
             return ""
         }
@@ -27,11 +28,13 @@ final class DuckDBResult {
     }
 
     func columnType(at index: Int) -> DuckDBColumnType {
+        guard index >= 0, index < columnCount else { return .unknown }
         let rawType = duckdb_column_type(&result, idx_t(index))
         return DuckDBColumnType.mapType(from: rawType)
     }
 
     func value(row: Int, col: Int) -> DuckDBValue {
+        guard row >= 0, row < rowCount, col >= 0, col < columnCount else { return .null }
         let r = idx_t(row)
         let c = idx_t(col)
 
