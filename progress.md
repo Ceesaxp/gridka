@@ -1583,3 +1583,13 @@
   - SQL comment parsing adds states to the scanner: check for `--` (line comment to newline), check for `/*` (block comment to `*/`), and normal scanning -- the state machine remains linear O(n) single-pass
   - The `showError()` in ComputedColumnPanelController is non-fatal: it displays the error in the UI label and returns `false` from `validateInput()`, preventing the panel from closing
 ----
+
+## 2026-02-27, 13:25 - US-001 - Fix double-quoted identifier bypass in semicolon scanner
+- Code review found that `containsSemicolonOutsideQuotes` did not track double-quoted identifiers, allowing a bypass like `"col--name"; DELETE` where `--` inside double quotes was misinterpreted as a line comment
+- Refactored the scanner to use a unified `quoteChar: Character?` that tracks both `'` (string literals) and `"` (identifiers), with doubled-character escaping for both
+- Files changed: Sources/Model/FileSession.swift
+- Build succeeds, all 94 tests pass
+- **Learnings for future iterations:**
+  - SQL has two quoting contexts: single quotes for literals, double quotes for identifiers -- both must be tracked by any token-level scanner
+  - The unified `quoteChar` approach is simpler and more correct than separate boolean flags
+----

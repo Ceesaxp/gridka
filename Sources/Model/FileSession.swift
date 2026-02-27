@@ -2023,27 +2023,29 @@ final class FileSession {
         let rows: [[String]]
     }
 
-    /// Returns true if `sql` contains a semicolon outside of single-quoted string literals
-    /// and SQL comments. Handles SQL-standard doubled single quotes (`''`) as an escaped
-    /// quote inside a literal, `--` line comments, and `/* */` block comments.
+    /// Returns true if `sql` contains a semicolon outside of quoted contexts and SQL comments.
+    /// Tracked contexts: single-quoted string literals (`'...'`), double-quoted identifiers
+    /// (`"..."`), `--` line comments, and `/* */` block comments. Both quote styles handle
+    /// SQL-standard doubled-character escaping (`''` and `""`).
     static func containsSemicolonOutsideQuotes(_ sql: String) -> Bool {
-        var inString = false
+        var quoteChar: Character? = nil  // non-nil when inside '...' or "..."
         var i = sql.startIndex
         while i < sql.endIndex {
             let ch = sql[i]
-            if inString {
-                if ch == "'" {
+            if let q = quoteChar {
+                // Inside a quoted region — only the matching quote can end it
+                if ch == q {
                     let next = sql.index(after: i)
-                    if next < sql.endIndex && sql[next] == "'" {
-                        // Escaped quote (''), skip both
+                    if next < sql.endIndex && sql[next] == q {
+                        // Doubled quote escape (''/"""), skip both
                         i = sql.index(after: next)
                         continue
                     }
-                    inString = false
+                    quoteChar = nil
                 }
             } else {
-                if ch == "'" {
-                    inString = true
+                if ch == "'" || ch == "\"" {
+                    quoteChar = ch
                 } else if ch == "-" {
                     // Check for -- line comment
                     let next = sql.index(after: i)
