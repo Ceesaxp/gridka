@@ -2,10 +2,15 @@ import Foundation
 
 final class QueryCoordinator {
 
+    /// The base table name for queries. Defaults to "data" for regular file sessions.
+    /// Summary sessions (Group By results) set this to their temp table name.
+    var tableName: String = "data"
+
     // MARK: - Public Query Builders
 
     func buildQuery(for state: ViewState, columns: [ColumnDescriptor], range: Range<Int>) -> String {
-        var parts = ["SELECT * FROM data"]
+        let source = buildSourceExpression(for: state)
+        var parts = ["SELECT * FROM \(source)"]
 
         let whereClause = buildWhereClause(for: state, columns: columns)
         if !whereClause.isEmpty {
@@ -25,7 +30,8 @@ final class QueryCoordinator {
     }
 
     func buildCountQuery(for state: ViewState, columns: [ColumnDescriptor]) -> String {
-        var parts = ["SELECT COUNT(*) FROM data"]
+        let source = buildSourceExpression(for: state)
+        var parts = ["SELECT COUNT(*) FROM \(source)"]
 
         let whereClause = buildWhereClause(for: state, columns: columns)
         if !whereClause.isEmpty {
@@ -51,7 +57,27 @@ final class QueryCoordinator {
         return result
     }
 
-    // MARK: - Private Builders
+    /// Builds just the WHERE clause (without the "WHERE" keyword) from the current ViewState.
+    /// Returns an empty string if no conditions apply. Used by ProfilerQueryBuilder to include
+    /// the same filter/search conditions in profiler queries.
+    ///
+    /// Callers must use `buildSourceExpression(for:)` as the FROM source so that computed
+    /// column aliases referenced in filters/search actually exist in the query context.
+    func buildWhereSQL(for state: ViewState, columns: [ColumnDescriptor]) -> String {
+        return buildWhereClause(for: state, columns: columns)
+    }
+
+    /// Returns the FROM source: plain "data" when no computed columns exist,
+    /// or a subquery "(SELECT *, (expr) AS name, ... FROM data)" when they do.
+    /// Used by ProfilerQueryBuilder alongside `buildWhereSQL` so that computed column
+    /// aliases are available for filters and search.
+    func buildSourceExpression(for state: ViewState) -> String {
+        guard !state.computedColumns.isEmpty else { return tableName }
+        let computedParts = state.computedColumns.map { cc in
+            "(\(cc.expression)) AS \(QueryCoordinator.quote(cc.name))"
+        }
+        return "(SELECT *, \(computedParts.joined(separator: ", ")) FROM \(tableName))"
+    }
 
     private func buildWhereClause(for state: ViewState, columns: [ColumnDescriptor]) -> String {
         var conditions: [String] = []
@@ -63,7 +89,7 @@ final class QueryCoordinator {
         }
 
         if let searchTerm = state.searchTerm, !searchTerm.isEmpty {
-            let searchCondition = buildSearchCondition(searchTerm, columns: columns)
+            let searchCondition = buildSearchCondition(searchTerm, columns: columns, computedColumns: state.computedColumns)
             if !searchCondition.isEmpty {
                 conditions.append("(\(searchCondition))")
             }
@@ -180,11 +206,15 @@ final class QueryCoordinator {
         }
     }
 
-    private func buildSearchCondition(_ searchTerm: String, columns: [ColumnDescriptor]) -> String {
+    private func buildSearchCondition(_ searchTerm: String, columns: [ColumnDescriptor], computedColumns: [ComputedColumn] = []) -> String {
         let escapedTerm = QueryCoordinator.escape(searchTerm)
-        let conditions = columns
+        var conditions = columns
             .filter { $0.name != "_gridka_rowid" }
             .map { "CAST(\(QueryCoordinator.quote($0.name)) AS TEXT) ILIKE '%\(escapedTerm)%' ESCAPE '\\'" }
+        // Include computed columns in global search
+        for cc in computedColumns {
+            conditions.append("CAST(\(QueryCoordinator.quote(cc.name)) AS TEXT) ILIKE '%\(escapedTerm)%' ESCAPE '\\'")
+        }
         return conditions.joined(separator: " OR ")
     }
 

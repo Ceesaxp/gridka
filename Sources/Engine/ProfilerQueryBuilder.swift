@@ -1,0 +1,297 @@
+import Foundation
+
+/// Generates DuckDB SQL queries for the column profiler sidebar.
+/// All queries respect the current ViewState filters/search so the profiler reflects filtered data.
+final class ProfilerQueryBuilder {
+
+    private let queryCoordinator = QueryCoordinator()
+
+    /// The base table name for queries. Must be kept in sync with the owning
+    /// FileSession's QueryCoordinator so profiler queries target the right table.
+    var tableName: String {
+        get { queryCoordinator.tableName }
+        set { queryCoordinator.tableName = newValue }
+    }
+
+    /// Builds the overview stats query for a column: row count, unique count, null count, empty count.
+    /// Returns a single-row result with 4 columns: total_rows, unique_count, null_count, empty_count.
+    func buildOverviewQuery(columnName: String, viewState: ViewState, columns: [ColumnDescriptor]) -> String {
+        let col = QueryCoordinator.quote(columnName)
+        let source = queryCoordinator.buildSourceExpression(for: viewState)
+        let whereClause = queryCoordinator.buildWhereSQL(for: viewState, columns: columns)
+        let whereSQL = whereClause.isEmpty ? "" : " WHERE \(whereClause)"
+
+        return """
+        SELECT \
+        COUNT(*) AS total_rows, \
+        COUNT(DISTINCT \(col)) AS unique_count, \
+        COUNT(*) - COUNT(\(col)) AS null_count, \
+        SUM(CASE WHEN CAST(\(col) AS VARCHAR) = '' THEN 1 ELSE 0 END) AS empty_count \
+        FROM \(source)\(whereSQL)
+        """
+    }
+
+    // MARK: - Descriptive Statistics Query
+
+    /// Builds a descriptive statistics query for numeric columns (INTEGER, BIGINT, FLOAT, DOUBLE).
+    /// Returns a single-row result with: min, max, avg, median, stddev, q1, q3.
+    func buildDescriptiveStatsQuery(columnName: String, viewState: ViewState, columns: [ColumnDescriptor]) -> String {
+        let col = QueryCoordinator.quote(columnName)
+        let source = queryCoordinator.buildSourceExpression(for: viewState)
+        let whereClause = queryCoordinator.buildWhereSQL(for: viewState, columns: columns)
+        let whereSQL = whereClause.isEmpty ? "" : " WHERE \(whereClause)"
+
+        return """
+        SELECT \
+        MIN(\(col)) AS col_min, \
+        MAX(\(col)) AS col_max, \
+        AVG(\(col)) AS col_avg, \
+        MEDIAN(\(col)) AS col_median, \
+        STDDEV(\(col)) AS col_stddev, \
+        QUANTILE_CONT(\(col), 0.25) AS col_q1, \
+        QUANTILE_CONT(\(col), 0.75) AS col_q3 \
+        FROM \(source)\(whereSQL)
+        """
+    }
+
+    // MARK: - Distribution Queries
+
+    /// Builds a histogram query for numeric columns using WIDTH_BUCKET.
+    /// Returns rows with: bucket_label (VARCHAR), cnt (BIGINT), and a first row with min/max metadata.
+    /// The first query gets min/max, then we use WIDTH_BUCKET to create equal-width bins.
+    func buildNumericHistogramQuery(
+        columnName: String,
+        viewState: ViewState,
+        columns: [ColumnDescriptor],
+        bucketCount: Int = 10
+    ) -> String {
+        let col = QueryCoordinator.quote(columnName)
+        let source = queryCoordinator.buildSourceExpression(for: viewState)
+        let whereClause = queryCoordinator.buildWhereSQL(for: viewState, columns: columns)
+        let filterSQL = whereClause.isEmpty ? "" : " AND \(whereClause)"
+
+        // Use a CTE to compute min/max, then WIDTH_BUCKET for binning.
+        // DuckDB's WIDTH_BUCKET(value, min, max, count) returns bucket 0 for < min,
+        // count+1 for >= max. We clamp to 1..count range.
+        return """
+        WITH bounds AS ( \
+        SELECT MIN(\(col)) AS col_min, MAX(\(col)) AS col_max \
+        FROM \(source) WHERE \(col) IS NOT NULL\(filterSQL) \
+        ), \
+        bucketed AS ( \
+        SELECT \
+        CASE WHEN bounds.col_min = bounds.col_max THEN 1 \
+        ELSE LEAST(\(bucketCount), GREATEST(1, \
+        WIDTH_BUCKET(\(col)::DOUBLE, bounds.col_min::DOUBLE, bounds.col_max::DOUBLE + 1e-9, \(bucketCount)) \
+        )) END AS bucket, \
+        bounds.col_min, bounds.col_max \
+        FROM \(source), bounds \
+        WHERE \(col) IS NOT NULL\(filterSQL) \
+        ) \
+        SELECT \
+        bucket, \
+        COUNT(*) AS cnt, \
+        MIN(col_min) AS col_min, \
+        MIN(col_max) AS col_max \
+        FROM bucketed \
+        GROUP BY bucket \
+        ORDER BY bucket
+        """
+    }
+
+    /// Builds a frequency query for categorical columns (top N values by count).
+    func buildCategoricalFrequencyQuery(
+        columnName: String,
+        viewState: ViewState,
+        columns: [ColumnDescriptor],
+        limit: Int = 10
+    ) -> String {
+        let col = QueryCoordinator.quote(columnName)
+        let source = queryCoordinator.buildSourceExpression(for: viewState)
+        let whereClause = queryCoordinator.buildWhereSQL(for: viewState, columns: columns)
+        let filterSQL = whereClause.isEmpty ? "" : " AND \(whereClause)"
+
+        return """
+        SELECT CAST(\(col) AS VARCHAR) AS val, COUNT(*) AS cnt \
+        FROM \(source) \
+        WHERE \(col) IS NOT NULL\(filterSQL) \
+        GROUP BY \(col) \
+        ORDER BY cnt DESC \
+        LIMIT \(limit)
+        """
+    }
+
+    // MARK: - Top Values Query
+
+    /// Builds a query to fetch the top N most frequent values for any column type.
+    /// Returns rows with: val (VARCHAR), cnt (BIGINT).
+    func buildTopValuesQuery(
+        columnName: String,
+        viewState: ViewState,
+        columns: [ColumnDescriptor],
+        limit: Int = 10
+    ) -> String {
+        let col = QueryCoordinator.quote(columnName)
+        let source = queryCoordinator.buildSourceExpression(for: viewState)
+        let whereClause = queryCoordinator.buildWhereSQL(for: viewState, columns: columns)
+        let filterSQL = whereClause.isEmpty ? "" : " AND \(whereClause)"
+
+        return """
+        SELECT CAST(\(col) AS VARCHAR) AS val, COUNT(*) AS cnt \
+        FROM \(source) \
+        WHERE \(col) IS NOT NULL\(filterSQL) \
+        GROUP BY \(col) \
+        ORDER BY cnt DESC \
+        LIMIT \(limit)
+        """
+    }
+
+    // MARK: - Full Frequency Query (for Frequency Panel)
+
+    /// Builds a full frequency query returning all distinct values with counts (no LIMIT).
+    /// Used by the frequency panel (US-011) to show the complete value distribution.
+    func buildFullFrequencyQuery(
+        columnName: String,
+        viewState: ViewState,
+        columns: [ColumnDescriptor]
+    ) -> String {
+        let col = QueryCoordinator.quote(columnName)
+        let source = queryCoordinator.buildSourceExpression(for: viewState)
+        let whereClause = queryCoordinator.buildWhereSQL(for: viewState, columns: columns)
+        let filterSQL = whereClause.isEmpty ? "" : " AND \(whereClause)"
+
+        return """
+        SELECT CAST(\(col) AS VARCHAR) AS val, COUNT(*) AS cnt \
+        FROM \(source) \
+        WHERE \(col) IS NOT NULL\(filterSQL) \
+        GROUP BY \(col) \
+        ORDER BY cnt DESC
+        """
+    }
+
+    /// Builds a binned frequency query for numeric columns using WIDTH_BUCKET.
+    /// Returns bin label and count for equal-width bins.
+    func buildBinnedFrequencyQuery(
+        columnName: String,
+        viewState: ViewState,
+        columns: [ColumnDescriptor],
+        bucketCount: Int = 10
+    ) -> String {
+        let col = QueryCoordinator.quote(columnName)
+        let source = queryCoordinator.buildSourceExpression(for: viewState)
+        let whereClause = queryCoordinator.buildWhereSQL(for: viewState, columns: columns)
+        let filterSQL = whereClause.isEmpty ? "" : " AND \(whereClause)"
+
+        return """
+        WITH bounds AS ( \
+        SELECT MIN(\(col)) AS col_min, MAX(\(col)) AS col_max \
+        FROM \(source) WHERE \(col) IS NOT NULL\(filterSQL) \
+        ), \
+        bucketed AS ( \
+        SELECT \
+        CASE WHEN bounds.col_min = bounds.col_max THEN 1 \
+        ELSE LEAST(\(bucketCount), GREATEST(1, \
+        WIDTH_BUCKET(\(col)::DOUBLE, bounds.col_min::DOUBLE, bounds.col_max::DOUBLE + 1e-9, \(bucketCount)) \
+        )) END AS bucket, \
+        bounds.col_min, bounds.col_max \
+        FROM \(source), bounds \
+        WHERE \(col) IS NOT NULL\(filterSQL) \
+        ) \
+        SELECT \
+        bucket, \
+        COUNT(*) AS cnt, \
+        MIN(col_min) AS col_min, \
+        MIN(col_max) AS col_max \
+        FROM bucketed \
+        GROUP BY bucket \
+        ORDER BY bucket
+        """
+    }
+
+    /// Builds a boolean distribution query returning true/false counts.
+    func buildBooleanDistributionQuery(
+        columnName: String,
+        viewState: ViewState,
+        columns: [ColumnDescriptor]
+    ) -> String {
+        let col = QueryCoordinator.quote(columnName)
+        let source = queryCoordinator.buildSourceExpression(for: viewState)
+        let whereClause = queryCoordinator.buildWhereSQL(for: viewState, columns: columns)
+        let whereSQL = whereClause.isEmpty ? "" : " WHERE \(whereClause)"
+
+        return """
+        SELECT \
+        SUM(CASE WHEN \(col) = true THEN 1 ELSE 0 END) AS true_count, \
+        SUM(CASE WHEN \(col) = false THEN 1 ELSE 0 END) AS false_count \
+        FROM \(source)\(whereSQL)
+        """
+    }
+
+    // MARK: - Batch Summary Queries (US-014)
+
+    /// Builds a single query to fetch cardinality (distinct count) and null count for ALL columns at once.
+    /// Returns one row per column with: col_name, distinct_count, null_count.
+    /// This batches what would otherwise be N individual queries into one.
+    func buildBatchCardinalityQuery(columns: [ColumnDescriptor]) -> String {
+        let cases = columns
+            .filter { $0.name != "_gridka_rowid" }
+            .map { col in
+                let q = QueryCoordinator.quote(col.name)
+                return "SELECT '\(col.name.replacingOccurrences(of: "'", with: "''"))' AS col_name, COUNT(DISTINCT \(q)) AS distinct_count, COUNT(*) - COUNT(\(q)) AS null_count FROM \(self.tableName)"
+            }
+        return cases.joined(separator: " UNION ALL ")
+    }
+
+    /// Builds a histogram query for a numeric column summary (no filter — uses all data).
+    func buildSummaryNumericHistogramQuery(columnName: String, bucketCount: Int = 10) -> String {
+        let col = QueryCoordinator.quote(columnName)
+        return """
+        WITH bounds AS ( \
+        SELECT MIN(\(col)) AS col_min, MAX(\(col)) AS col_max \
+        FROM \(tableName) WHERE \(col) IS NOT NULL \
+        ), \
+        bucketed AS ( \
+        SELECT \
+        CASE WHEN bounds.col_min = bounds.col_max THEN 1 \
+        ELSE LEAST(\(bucketCount), GREATEST(1, \
+        WIDTH_BUCKET(\(col)::DOUBLE, bounds.col_min::DOUBLE, bounds.col_max::DOUBLE + 1e-9, \(bucketCount)) \
+        )) END AS bucket, \
+        bounds.col_min, bounds.col_max \
+        FROM \(tableName), bounds \
+        WHERE \(col) IS NOT NULL \
+        ) \
+        SELECT \
+        bucket, \
+        COUNT(*) AS cnt, \
+        MIN(col_min) AS col_min, \
+        MIN(col_max) AS col_max \
+        FROM bucketed \
+        GROUP BY bucket \
+        ORDER BY bucket
+        """
+    }
+
+    /// Builds a frequency query for a categorical column summary (no filter — uses all data).
+    func buildSummaryCategoricalFrequencyQuery(columnName: String, limit: Int = 15) -> String {
+        let col = QueryCoordinator.quote(columnName)
+        return """
+        SELECT CAST(\(col) AS VARCHAR) AS val, COUNT(*) AS cnt \
+        FROM \(tableName) \
+        WHERE \(col) IS NOT NULL \
+        GROUP BY \(col) \
+        ORDER BY cnt DESC \
+        LIMIT \(limit)
+        """
+    }
+
+    /// Builds a boolean distribution query for a column summary (no filter — uses all data).
+    func buildSummaryBooleanDistributionQuery(columnName: String) -> String {
+        let col = QueryCoordinator.quote(columnName)
+        return """
+        SELECT \
+        SUM(CASE WHEN \(col) = true THEN 1 ELSE 0 END) AS true_count, \
+        SUM(CASE WHEN \(col) = false THEN 1 ELSE 0 END) AS false_count \
+        FROM \(tableName)
+        """
+    }
+}

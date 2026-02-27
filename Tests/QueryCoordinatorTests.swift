@@ -518,4 +518,112 @@ final class QueryCoordinatorTests: XCTestCase {
         )
         return coordinator.buildQuery(for: state, columns: sampleColumns, range: 0..<500)
     }
+
+    // MARK: - Computed Columns (US-019)
+
+    func testComputedColumnInSelect() {
+        let state = ViewState(
+            sortColumns: [],
+            filters: [],
+            searchTerm: nil,
+            visibleRange: 0..<500,
+            totalFilteredRows: 1000,
+            computedColumns: [ComputedColumn(name: "full_name", expression: "CONCAT(name, ' ', name)")]
+        )
+        let sql = coordinator.buildQuery(for: state, columns: sampleColumns, range: 0..<500)
+        XCTAssertEqual(sql, "SELECT * FROM (SELECT *, (CONCAT(name, ' ', name)) AS \"full_name\" FROM data) LIMIT 500 OFFSET 0")
+    }
+
+    func testMultipleComputedColumns() {
+        let state = ViewState(
+            sortColumns: [],
+            filters: [],
+            searchTerm: nil,
+            visibleRange: 0..<500,
+            totalFilteredRows: 1000,
+            computedColumns: [
+                ComputedColumn(name: "double_age", expression: "age * 2"),
+                ComputedColumn(name: "name_upper", expression: "UPPER(name)"),
+            ]
+        )
+        let sql = coordinator.buildQuery(for: state, columns: sampleColumns, range: 0..<500)
+        XCTAssertEqual(sql, "SELECT * FROM (SELECT *, (age * 2) AS \"double_age\", (UPPER(name)) AS \"name_upper\" FROM data) LIMIT 500 OFFSET 0")
+    }
+
+    func testComputedColumnCountQuery() {
+        let state = ViewState(
+            sortColumns: [],
+            filters: [],
+            searchTerm: nil,
+            visibleRange: 0..<500,
+            totalFilteredRows: 1000,
+            computedColumns: [ComputedColumn(name: "calc", expression: "age + 1")]
+        )
+        let sql = coordinator.buildCountQuery(for: state, columns: sampleColumns)
+        XCTAssertEqual(sql, "SELECT COUNT(*) FROM (SELECT *, (age + 1) AS \"calc\" FROM data)")
+    }
+
+    func testComputedColumnWithFilterAndSort() {
+        let state = ViewState(
+            sortColumns: [SortColumn(column: "double_age", direction: .descending)],
+            filters: [ColumnFilter(column: "double_age", operator: .greaterThan, value: .number(50))],
+            searchTerm: nil,
+            visibleRange: 0..<500,
+            totalFilteredRows: 100,
+            computedColumns: [ComputedColumn(name: "double_age", expression: "age * 2")]
+        )
+        let sql = coordinator.buildQuery(for: state, columns: sampleColumns, range: 0..<500)
+        XCTAssertEqual(sql, "SELECT * FROM (SELECT *, (age * 2) AS \"double_age\" FROM data) WHERE \"double_age\" > 50 ORDER BY \"double_age\" DESC NULLS LAST LIMIT 500 OFFSET 0")
+    }
+
+    func testNoComputedColumnsUsesPlainData() {
+        let state = ViewState(
+            sortColumns: [],
+            filters: [],
+            searchTerm: nil,
+            visibleRange: 0..<500,
+            totalFilteredRows: 1000,
+            computedColumns: []
+        )
+        let sql = coordinator.buildQuery(for: state, columns: sampleColumns, range: 0..<500)
+        XCTAssertEqual(sql, "SELECT * FROM data LIMIT 500 OFFSET 0")
+    }
+
+    func testComputedColumnInSearch() {
+        let state = ViewState(
+            sortColumns: [],
+            filters: [],
+            searchTerm: "hello",
+            visibleRange: 0..<500,
+            totalFilteredRows: 100,
+            computedColumns: [ComputedColumn(name: "greeting", expression: "CONCAT('Hello ', name)")]
+        )
+        let sql = coordinator.buildQuery(for: state, columns: sampleColumns, range: 0..<500)
+        // Search should include both base columns and computed columns
+        XCTAssert(sql.contains("CAST(\"greeting\" AS TEXT) ILIKE '%hello%'"), "Search should include computed column")
+        XCTAssert(sql.contains("CAST(\"name\" AS TEXT) ILIKE '%hello%'"), "Search should include base columns")
+    }
+
+    func testBuildWhereSQLIncludesComputedFiltersAndSearch() {
+        let state = ViewState(
+            sortColumns: [],
+            filters: [
+                ColumnFilter(column: "name", operator: .contains, value: .string("alice")),
+                ColumnFilter(column: "double_age", operator: .greaterThan, value: .number(50)),
+            ],
+            searchTerm: "test",
+            visibleRange: 0..<500,
+            totalFilteredRows: 100,
+            computedColumns: [ComputedColumn(name: "double_age", expression: "age * 2")]
+        )
+        let whereSQL = coordinator.buildWhereSQL(for: state, columns: sampleColumns)
+        // Base column filter should be included
+        XCTAssert(whereSQL.contains("\"name\" ILIKE"), "Base column filter should be present")
+        // Computed column filter should be included (profiler now uses source subquery)
+        XCTAssert(whereSQL.contains("\"double_age\" > 50"), "Computed column filter should be present")
+        // Computed column should appear in search
+        XCTAssert(whereSQL.contains("CAST(\"double_age\" AS TEXT) ILIKE '%test%'"), "Computed column should be in search")
+        // Base column search should still work
+        XCTAssert(whereSQL.contains("CAST(\"name\" AS TEXT) ILIKE '%test%'"), "Base column search should be present")
+    }
 }

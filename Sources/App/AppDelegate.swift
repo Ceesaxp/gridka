@@ -37,6 +37,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         return windowTabs.values.first(where: { $0.tableViewController === tvc })
     }
 
+    private func tab(for session: FileSession) -> TabContext? {
+        return windowTabs.values.first(where: { $0.fileSession === session })
+    }
+
     // MARK: - Memory Rebalancing
 
     /// Rebalances DuckDB memory limits across all open tabs.
@@ -60,6 +64,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMainMenu()
+
+        // Sync toolbar button across all tabs when frequency panel closes
+        FrequencyPanelController.onClose = { [weak self] in
+            guard let self = self else { return }
+            for tab in self.windowTabs.values {
+                tab.tableViewController?.analysisBar.setFeatureActive(.frequency, active: false)
+            }
+        }
+
+        // US-013: Click-to-filter from frequency view
+        // Single-click a value → add filter (column = value), panel stays open
+        FrequencyPanelController.onValueClicked = { [weak self] columnName, value, session in
+            self?.applyFrequencyFilter(columnName: columnName, value: value, session: session)
+        }
+
+        // Double-click a value → add filter AND close the frequency panel
+        FrequencyPanelController.onValueDoubleClicked = { [weak self] columnName, value, session in
+            self?.applyFrequencyFilter(columnName: columnName, value: value, session: session)
+            FrequencyPanelController.closeIfOpen()
+        }
+
+        // US-017: Sync toolbar button when computed column panel closes
+        ComputedColumnPanelController.onClose = { [weak self] in
+            guard let self = self else { return }
+            for tab in self.windowTabs.values {
+                tab.tableViewController?.analysisBar.setFeatureActive(.computedColumn, active: false)
+            }
+        }
+
+        // US-019: Add computed column to table when user confirms
+        ComputedColumnPanelController.onAddColumn = { [weak self] name, expression, session in
+            self?.handleComputedColumnAdded(name: name, expression: expression, session: session)
+        }
+
+        // US-021: Sync toolbar button when Group By panel closes
+        GroupByPanelController.onClose = { [weak self] in
+            guard let self = self else { return }
+            for tab in self.windowTabs.values {
+                tab.tableViewController?.analysisBar.setFeatureActive(.groupBy, active: false)
+            }
+        }
+
+        // US-023: Open Group By results as new tab
+        GroupByPanelController.onOpenAsNewTab = { [weak self] definition, session in
+            self?.openGroupBySummary(definition: definition, sourceSession: session)
+        }
+
         if windowTabs.isEmpty {
             let win = createWindow()
             let tab = TabContext()
@@ -67,6 +118,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             showEmptyState(in: win, tab: tab)
             win.makeKeyAndOrderFront(nil)
         }
+
+        handleUITestAutoOpenIfNeeded()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -109,7 +162,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         win.tabbingMode = .preferred
         win.delegate = self
 
-        let contentView = DragDropView(frame: win.contentView!.bounds)
+        let contentView = DragDropView(frame: win.contentView?.bounds ?? win.frame)
         contentView.autoresizingMask = [.width, .height]
         contentView.onFileDrop = { [weak self, weak win] url in
             guard let self = self, let win = win else { return }
@@ -196,6 +249,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         deleteColumnItem.target = self
         editMenu.addItem(deleteColumnItem)
 
+        let computedColumnItem = NSMenuItem(title: "Add Computed Column…", action: #selector(addComputedColumnAction(_:)), keyEquivalent: "f")
+        computedColumnItem.keyEquivalentModifierMask = [.command, .option]
+        computedColumnItem.target = self
+        editMenu.addItem(computedColumnItem)
+
+        let groupByItem = NSMenuItem(title: "Group By…", action: #selector(groupByAction(_:)), keyEquivalent: "g")
+        groupByItem.keyEquivalentModifierMask = [.command, .option]
+        groupByItem.target = self
+        editMenu.addItem(groupByItem)
+
         editMenu.addItem(NSMenuItem.separator())
 
         let addRowItem = NSMenuItem(title: "Add Row", action: #selector(addRowAction(_:)), keyEquivalent: "r")
@@ -234,6 +297,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         toggleDetailItem.keyEquivalentModifierMask = [.command, .shift]
         toggleDetailItem.target = self
         viewMenu.addItem(toggleDetailItem)
+
+        let toggleAnalysisItem = NSMenuItem(title: "Show Analysis Toolbar", action: #selector(toggleAnalysisToolbarAction(_:)), keyEquivalent: "t")
+        toggleAnalysisItem.keyEquivalentModifierMask = [.command, .option]
+        toggleAnalysisItem.target = self
+        viewMenu.addItem(toggleAnalysisItem)
+
+        let toggleProfilerItem = NSMenuItem(title: "Toggle Column Profiler", action: #selector(toggleProfilerAction(_:)), keyEquivalent: "p")
+        toggleProfilerItem.keyEquivalentModifierMask = [.command, .shift]
+        toggleProfilerItem.target = self
+        viewMenu.addItem(toggleProfilerItem)
 
         viewMenu.addItem(NSMenuItem.separator())
 
@@ -301,6 +374,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
         NSApp.mainMenu = mainMenu
         NSApp.windowsMenu = windowMenu
+    }
+
+    // MARK: - UI Test Hooks
+
+    /// UI tests can provide files to open on launch via environment variables:
+    /// - GRIDKA_UI_TEST_FILE: single absolute path
+    /// - GRIDKA_UI_TEST_FILES: multiple absolute paths joined by "::"
+    /// This avoids automating NSSave/NOpen panels in XCUITest.
+    private func handleUITestAutoOpenIfNeeded() {
+        let env = ProcessInfo.processInfo.environment
+        guard env["GRIDKA_UI_TEST_MODE"] == "1" else { return }
+
+        var paths: [String] = []
+        if let many = env["GRIDKA_UI_TEST_FILES"], !many.isEmpty {
+            paths = many.components(separatedBy: "::").filter { !$0.isEmpty }
+        } else if let single = env["GRIDKA_UI_TEST_FILE"], !single.isEmpty {
+            paths = [single]
+        }
+        guard !paths.isEmpty else { return }
+
+        // Wait one runloop turn so the initial empty tab window is fully ready.
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            for path in paths where FileManager.default.fileExists(atPath: path) {
+                _ = self.application(NSApp, openFile: path)
+            }
+        }
     }
 
     // MARK: - New Tab
@@ -427,6 +527,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         guard let session = activeTab?.fileSession, session.isFullyLoaded else { return }
         guard let win = activeWindow else { return }
 
+        // Summary sessions export to CSV — no encoding/delimiter accessory needed
+        if session.isSummarySession {
+            let panel = NSSavePanel()
+            let baseName = session.filePath.deletingPathExtension().lastPathComponent
+            panel.nameFieldStringValue = baseName + "_summary.csv"
+            panel.allowedContentTypes = [.commaSeparatedText]
+            panel.canCreateDirectories = true
+
+            panel.beginSheetModal(for: win) { [weak self] response in
+                guard response == .OK, let url = panel.url else { return }
+                session.exportSummaryResults(to: url) { [weak self] result in
+                    if case .failure(let error) = result {
+                        self?.showError(error, context: "exporting summary results")
+                    }
+                }
+            }
+            return
+        }
+
         let panel = NSSavePanel()
         panel.nameFieldStringValue = session.filePath.lastPathComponent
         panel.allowedContentTypes = [
@@ -472,6 +591,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             // Track document-edited state via window dirty dot
             session.onModifiedChanged = { [weak win] modified in
                 win?.isDocumentEdited = modified
+            }
+
+            // Wire sparkline refresh when column summaries are computed (US-015)
+            session.onSummariesComputed = { [weak tab] in
+                tab?.tableViewController?.updateSparklines()
             }
 
             showTableView(in: win, tab: tab)
@@ -524,6 +648,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
                             // Rebalance memory across all tabs now that this tab has an active engine
                             self.rebalanceMemoryLimits()
+
+                            // Compute column summaries in background for sparklines (US-014)
+                            if SettingsManager.shared.showSparklines {
+                                session.computeColumnSummaries()
+                            }
                         case .failure(let error):
                             statusBar?.updateProgress(1.0)
                             self.showError(error, context: "loading full file")
@@ -537,6 +666,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             }
         } catch {
             showError(error, context: "opening file")
+        }
+    }
+
+    // MARK: - Group By Summary Tab (US-023)
+
+    /// Creates a new tab with the full Group By aggregation results.
+    private func openGroupBySummary(definition: GroupByDefinition, sourceSession: FileSession) {
+        // Resolve the window that owns the source session so the summary tab
+        // attaches to the correct tab group even when a floating panel is key.
+        guard let sourceTab = tab(for: sourceSession),
+              let parentWindow = window(for: sourceTab) ?? activeWindow else { return }
+
+        // Build tab title from group-by column names
+        let groupNames = definition.groupByColumns.joined(separator: ", ")
+        let tabTitle = groupNames.isEmpty ? "Summary: overall" : "Summary: by \(groupNames)"
+
+        FileSession.createSummarySession(from: sourceSession, definition: definition) { [weak self] result in
+            guard let self = self else { return }
+            switch result {
+            case .success(let summarySession):
+                let newWin = self.createWindow()
+                let newTab = TabContext()
+                self.windowTabs[newWin] = newTab
+                newTab.fileSession = summarySession
+                newWin.title = tabTitle
+
+                parentWindow.addTabbedWindow(newWin, ordered: .above)
+                newWin.makeKeyAndOrderFront(nil)
+
+                self.showTableView(in: newWin, tab: newTab)
+
+                let tvc = newTab.tableViewController
+                tvc?.fileSession = summarySession
+                tvc?.configureColumns(summarySession.columns)
+                tvc?.autoFitAllColumns()
+
+                // Status bar shows group count
+                tvc?.statusBar.updateRowCount(
+                    showing: summarySession.totalRows,
+                    total: summarySession.totalRows
+                )
+
+                self.rebalanceMemoryLimits()
+
+            case .failure(let error):
+                self.showError(error, context: "creating Group By summary")
+            }
         }
     }
 
@@ -605,22 +781,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
         tvc.onCellEdited = { [weak self, weak tvc] rowid, columnName, newValue, displayRow in
             guard let self = self, let tvc = tvc, let tab = self.tab(for: tvc) else { return }
+            guard tab.fileSession?.isSummarySession != true else { return }
             self.handleCellEdited(tab: tab, rowid: rowid, columnName: columnName, newValue: newValue, displayRow: displayRow)
         }
 
         tvc.onColumnRenamed = { [weak self, weak tvc] oldName, newName in
             guard let self = self, let tvc = tvc, let tab = self.tab(for: tvc) else { return }
+            guard tab.fileSession?.isSummarySession != true else { return }
             self.handleColumnRenamed(tab: tab, oldName: oldName, newName: newName)
         }
 
         tvc.onColumnTypeChanged = { [weak self, weak tvc] columnName, duckDBType in
             guard let self = self, let tvc = tvc, let tab = self.tab(for: tvc) else { return }
+            guard tab.fileSession?.isSummarySession != true else { return }
             self.handleColumnTypeChanged(tab: tab, columnName: columnName, duckDBType: duckDBType)
         }
 
         tvc.onColumnDeleted = { [weak self, weak tvc] columnName in
             guard let self = self, let tvc = tvc, let tab = self.tab(for: tvc) else { return }
+            guard tab.fileSession?.isSummarySession != true else { return }
             self.handleColumnDeleted(tab: tab, columnName: columnName)
+        }
+
+        tvc.onComputedColumnRemoved = { [weak self, weak tvc] columnName in
+            guard let self = self, let tvc = tvc, let tab = self.tab(for: tvc) else { return }
+            guard tab.fileSession?.isSummarySession != true else { return }
+            self.handleComputedColumnRemoved(tab: tab, columnName: columnName)
+        }
+
+        tvc.onValueFrequency = { [weak tvc] columnName in
+            guard let tvc = tvc, let session = tvc.fileSession else { return }
+            FrequencyPanelController.show(column: columnName, fileSession: session)
+            tvc.analysisBar.setFeatureActive(.frequency, active: FrequencyPanelController.isVisible)
+        }
+
+        tvc.onColumnSelected = { [weak self, weak tvc] columnName in
+            guard let self = self, let tvc = tvc, let tab = self.tab(for: tvc) else { return }
+            self.handleColumnSelected(tab: tab, columnName: columnName)
+        }
+
+        tvc.onSparklineClicked = { [weak self, weak tvc] columnName in
+            guard let self = self, let tvc = tvc, let tab = self.tab(for: tvc) else { return }
+            // Select the column
+            self.handleColumnSelected(tab: tab, columnName: columnName)
+            // Open the profiler sidebar if not already open
+            if !tvc.isProfilerVisible {
+                tvc.toggleProfilerSidebar()
+            }
+        }
+
+        tvc.onAnalysisFeatureToggled = { [weak self, weak tvc] feature, isActive in
+            guard let self = self, let tvc = tvc, let tab = self.tab(for: tvc) else { return }
+            self.handleAnalysisFeatureToggled(tab: tab, feature: feature, isActive: isActive)
         }
 
         tab.tableViewController = tvc
@@ -667,14 +879,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     // MARK: - Filter Handling
 
+    /// Applies an equals filter from the frequency panel to the panel's owning session.
+    /// Uses the session passed from the panel (not activeTab) to target the correct tab.
+    private func applyFrequencyFilter(columnName: String, value: String, session: FileSession) {
+        guard let tab = tab(for: session), let tvc = tab.tableViewController else { return }
+        var filters = session.viewState.filters
+        filters.removeAll { $0.column == columnName }
+        filters.append(ColumnFilter(column: columnName, operator: .equals, value: .string(value)))
+
+        var newState = session.viewState
+        newState.filters = filters
+        session.updateViewState(newState) {
+            tvc.statusBar.updateRowCount(
+                showing: session.viewState.totalFilteredRows,
+                total: session.totalRows
+            )
+        }
+
+        tvc.updateFilterBar()
+        tvc.updateProfilerSidebar()
+
+        let filterStartTime = CFAbsoluteTimeGetCurrent()
+
+        session.fetchPage(index: 0) { result in
+            let filterTime = CFAbsoluteTimeGetCurrent() - filterStartTime
+
+            switch result {
+            case .success:
+                tvc.reloadVisibleRows()
+                tvc.statusBar.showQueryTime(filterTime)
+            case .failure:
+                break
+            }
+        }
+
+        tvc.reloadVisibleRows()
+    }
+
     private func handleFiltersChanged(_ filters: [ColumnFilter]) {
         guard let session = activeTab?.fileSession, let tvc = activeTab?.tableViewController else { return }
 
         var newState = session.viewState
         newState.filters = filters
-        session.updateViewState(newState)
+        session.updateViewState(newState) {
+            tvc.statusBar.updateRowCount(
+                showing: session.viewState.totalFilteredRows,
+                total: session.totalRows
+            )
+        }
 
         tvc.updateFilterBar()
+        tvc.updateProfilerSidebar()
 
         let filterStartTime = CFAbsoluteTimeGetCurrent()
 
@@ -688,13 +943,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 tvc.statusBar.showQueryTime(filterTime)
             case .failure:
                 break
-            }
-
-            // Update row counts — requeryCount runs async, use small delay to let it complete
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                let filtered = session.viewState.totalFilteredRows
-                let total = session.totalRows
-                tvc.statusBar.updateRowCount(showing: filtered, total: total)
             }
         }
 
@@ -728,6 +976,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         activeTab?.tableViewController?.toggleDetailPane()
     }
 
+    @objc private func toggleAnalysisToolbarAction(_ sender: Any?) {
+        activeTab?.tableViewController?.toggleAnalysisToolbar()
+    }
+
+    @objc private func toggleProfilerAction(_ sender: Any?) {
+        activeTab?.tableViewController?.toggleProfilerSidebar()
+    }
+
     // MARK: - Header Toggle
 
     @objc private func toggleHeaderAction(_ sender: Any?) {
@@ -749,6 +1005,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 tvc.fileSession = session
                 tvc.configureColumns(session.columns)
                 tvc.autoFitAllColumns()
+                if SettingsManager.shared.showSparklines {
+                    session.computeColumnSummaries()
+                }
             case .failure(let error):
                 tvc.statusBar.updateProgress(1.0)
                 self.showError(error, context: "reloading file")
@@ -809,6 +1068,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 tvc.fileSession = session
                 tvc.configureColumns(session.columns)
                 tvc.autoFitAllColumns()
+                if SettingsManager.shared.showSparklines {
+                    session.computeColumnSummaries()
+                }
             case .failure(let error):
                 tvc.statusBar.updateProgress(1.0)
                 self.showError(error, context: "reloading with delimiter")
@@ -863,6 +1125,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 tvc.fileSession = session
                 tvc.configureColumns(session.columns)
                 tvc.autoFitAllColumns()
+                if SettingsManager.shared.showSparklines {
+                    session.computeColumnSummaries()
+                }
             case .failure(let error):
                 tvc.statusBar.updateProgress(1.0)
                 self.showError(error, context: "reloading with encoding \(encodingName)")
@@ -936,6 +1201,99 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
 
         tvc.presentAsSheet(sheetVC)
+    }
+
+    // MARK: - Add Computed Column (US-017)
+
+    @objc private func addComputedColumnAction(_ sender: Any?) {
+        guard let tab = activeTab else { return }
+        guard let session = tab.fileSession, session.isFullyLoaded else { return }
+        guard let tvc = tab.tableViewController else { return }
+
+        ComputedColumnPanelController.show(fileSession: session)
+        tvc.analysisBar.setFeatureActive(.computedColumn, active: true)
+    }
+
+    // MARK: - Group By (US-021)
+
+    @objc private func groupByAction(_ sender: Any?) {
+        guard let tab = activeTab else { return }
+        guard let session = tab.fileSession, session.isFullyLoaded else { return }
+        guard let tvc = tab.tableViewController else { return }
+
+        GroupByPanelController.show(fileSession: session)
+        tvc.analysisBar.setFeatureActive(.groupBy, active: true)
+    }
+
+    // MARK: - Computed Column Add/Remove (US-019)
+
+    private func handleComputedColumnAdded(name: String, expression: String, session: FileSession) {
+        guard let tab = tab(for: session), let tvc = tab.tableViewController else { return }
+
+        let cc = ComputedColumn(name: name, expression: expression)
+        var newState = session.viewState
+        newState.computedColumns.append(cc)
+        session.updateViewState(newState)
+
+        // Add the computed column to the table display
+        tvc.addComputedColumn(name: name)
+
+        let startTime = CFAbsoluteTimeGetCurrent()
+
+        // Re-fetch page 0 with the new computed column in the SELECT
+        session.fetchPage(index: 0) { [weak self] result in
+            let queryTime = CFAbsoluteTimeGetCurrent() - startTime
+
+            switch result {
+            case .success:
+                tvc.reloadVisibleRows()
+                tvc.statusBar.showQueryTime(queryTime)
+            case .failure(let error):
+                // Roll back: remove the computed column from state and UI
+                var rollbackState = session.viewState
+                rollbackState.computedColumns.removeAll { $0.name == name }
+                session.updateViewState(rollbackState)
+                tvc.removeComputedColumn(name: name)
+                self?.showError(error, context: "adding computed column")
+            }
+
+            tvc.statusBar.updateRowCount(
+                showing: session.viewState.totalFilteredRows,
+                total: session.totalRows
+            )
+        }
+
+        tvc.reloadVisibleRows()
+    }
+
+    private func handleComputedColumnRemoved(tab: TabContext, columnName: String) {
+        guard let session = tab.fileSession, let tvc = tab.tableViewController else { return }
+
+        var newState = session.viewState
+        newState.computedColumns.removeAll { $0.name == columnName }
+
+        // Also remove any sorts/filters referencing this column
+        newState.sortColumns.removeAll { $0.column == columnName }
+        newState.filters.removeAll { $0.column == columnName }
+        if newState.selectedColumn == columnName {
+            newState.selectedColumn = nil
+        }
+        session.updateViewState(newState) {
+            tvc.statusBar.updateRowCount(
+                showing: session.viewState.totalFilteredRows,
+                total: session.totalRows
+            )
+        }
+
+        // Remove the column from the table display
+        tvc.removeComputedColumn(name: columnName)
+        tvc.updateSortIndicators()
+        tvc.updateFilterBar()
+
+        // Re-fetch page 0 without the removed computed column
+        session.fetchPage(index: 0) { _ in
+            tvc.reloadVisibleRows()
+        }
     }
 
     // MARK: - Rename Column (from Edit menu)
@@ -1081,18 +1439,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 switch result {
                 case .success:
                     // Requery the filtered count to update totalFilteredRows
-                    session.requeryFilteredCount()
-
-                    tvc.tableView.deselectAll(nil)
-                    tvc.reloadVisibleRows()
-
-                    // Update status bar row counts after requeryCount completes
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    session.requeryFilteredCount {
                         tvc.statusBar.updateRowCount(
                             showing: session.viewState.totalFilteredRows,
                             total: session.totalRows
                         )
                     }
+
+                    tvc.tableView.deselectAll(nil)
+                    tvc.reloadVisibleRows()
                 case .failure(let error):
                     self.showError(error, context: "deleting rows")
                 }
@@ -1204,6 +1559,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
     }
 
+    // MARK: - Column Selection Handling
+
+    private func handleColumnSelected(tab: TabContext, columnName: String?) {
+        guard let session = tab.fileSession, let tvc = tab.tableViewController else { return }
+
+        var newState = session.viewState
+        newState.selectedColumn = columnName
+        session.updateViewState(newState)
+
+        tvc.updateSortIndicators()
+        tvc.updateProfilerSidebar()
+    }
+
+    // MARK: - Analysis Feature Handling
+
+    private func handleAnalysisFeatureToggled(tab: TabContext, feature: AnalysisFeature, isActive: Bool) {
+        guard let tvc = tab.tableViewController else { return }
+        switch feature {
+        case .profiler:
+            // Sync profiler sidebar visibility with toolbar button state
+            if isActive != tvc.isProfilerVisible {
+                tvc.toggleProfilerSidebar()
+            }
+        case .frequency:
+            if isActive {
+                if let selectedCol = tab.fileSession?.viewState.selectedColumn,
+                   let session = tab.fileSession {
+                    FrequencyPanelController.show(column: selectedCol, fileSession: session)
+                }
+            } else {
+                FrequencyPanelController.closeIfOpen()
+            }
+            tvc.analysisBar.setFeatureActive(.frequency, active: FrequencyPanelController.isVisible)
+        case .groupBy:
+            if isActive {
+                guard let session = tab.fileSession, session.isFullyLoaded,
+                      !session.isSummarySession else {
+                    tvc.analysisBar.setFeatureActive(.groupBy, active: false)
+                    return
+                }
+                GroupByPanelController.show(fileSession: session)
+            } else {
+                GroupByPanelController.closeIfOpen()
+            }
+            tvc.analysisBar.setFeatureActive(.groupBy, active: GroupByPanelController.isVisible)
+        case .computedColumn:
+            if isActive {
+                guard let session = tab.fileSession, !session.isSummarySession else {
+                    tvc.analysisBar.setFeatureActive(.computedColumn, active: false)
+                    return
+                }
+                ComputedColumnPanelController.show(fileSession: session)
+            } else {
+                ComputedColumnPanelController.closeIfOpen()
+            }
+            tvc.analysisBar.setFeatureActive(.computedColumn, active: ComputedColumnPanelController.isVisible)
+        }
+    }
+
     // MARK: - Search Handling
 
     @objc private func performFind(_ sender: Any?) {
@@ -1228,7 +1642,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
         var newState = session.viewState
         newState.searchTerm = term.isEmpty ? nil : term
-        session.updateViewState(newState)
+        session.updateViewState(newState) {
+            tvc.statusBar.updateRowCount(
+                showing: session.viewState.totalFilteredRows,
+                total: session.totalRows
+            )
+            tvc.searchBar.updateMatchCount(session.viewState.totalFilteredRows)
+        }
+
+        tvc.updateProfilerSidebar()
 
         let searchStartTime = CFAbsoluteTimeGetCurrent()
 
@@ -1242,14 +1664,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 tvc.statusBar.showQueryTime(searchTime)
             case .failure:
                 break
-            }
-
-            // Update row counts after requeryCount completes
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                let filtered = session.viewState.totalFilteredRows
-                let total = session.totalRows
-                tvc.statusBar.updateRowCount(showing: filtered, total: total)
-                tvc.searchBar.updateMatchCount(filtered)
             }
         }
 
@@ -1268,18 +1682,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         let session = activeTab?.fileSession
         let tvc = activeTab?.tableViewController
+        let isSummary = session?.isSummarySession ?? false
 
         if menuItem.action == #selector(saveDocument(_:)) {
-            return session?.isModified ?? false
+            return !isSummary && (session?.isModified ?? false)
         }
         if menuItem.action == #selector(saveAsDocument(_:)) {
             return session?.isFullyLoaded ?? false
         }
         if menuItem.action == #selector(addColumnAction(_:)) {
-            return session?.isFullyLoaded ?? false
+            return !isSummary && (session?.isFullyLoaded ?? false)
+        }
+        if menuItem.action == #selector(addComputedColumnAction(_:)) {
+            return !isSummary && (session?.isFullyLoaded ?? false)
+        }
+        if menuItem.action == #selector(groupByAction(_:)) {
+            return !isSummary && (session?.isFullyLoaded ?? false)
         }
         if menuItem.action == #selector(renameColumnAction(_:)) {
-            guard session?.isFullyLoaded ?? false else {
+            guard !isSummary, session?.isFullyLoaded ?? false else {
                 menuItem.title = "Rename Column…"
                 return false
             }
@@ -1292,7 +1713,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             return false
         }
         if menuItem.action == #selector(deleteColumnAction(_:)) {
-            guard session?.isFullyLoaded ?? false else {
+            guard !isSummary, session?.isFullyLoaded ?? false else {
                 menuItem.title = "Delete Column"
                 return false
             }
@@ -1305,21 +1726,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             return false
         }
         if menuItem.action == #selector(addRowAction(_:)) {
-            return session?.isFullyLoaded ?? false
+            return !isSummary && (session?.isFullyLoaded ?? false)
         }
         if menuItem.action == #selector(deleteRowsAction(_:)) {
+            if isSummary { return false }
             guard session?.isFullyLoaded ?? false else { return false }
             return (tvc?.tableView.selectedRowIndexes.isEmpty == false)
         }
         if menuItem.action == #selector(toggleHeaderAction(_:)) {
             menuItem.state = (session?.hasHeaders ?? true) ? .on : .off
-            return session?.isFullyLoaded ?? false
+            return !isSummary && (session?.isFullyLoaded ?? false)
         }
         if menuItem.action == #selector(toggleRowNumbersAction(_:)) {
             menuItem.state = (tvc?.isRowNumbersVisible ?? false) ? .on : .off
             return tvc != nil
         }
         if menuItem.action == #selector(changeDelimiterAction(_:)) {
+            if isSummary { return false }
             guard let delim = menuItem.representedObject as? String else { return false }
             let effective = session?.customDelimiter
             if delim.isEmpty {
@@ -1331,11 +1754,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             return session?.isFullyLoaded ?? false
         }
         if menuItem.action == #selector(changeEncodingAction(_:)) {
+            if isSummary { return false }
             guard let encName = menuItem.representedObject as? String else { return false }
             menuItem.state = (encName == session?.activeEncodingName) ? .on : .off
             return session?.isFullyLoaded ?? false
         }
         if menuItem.action == #selector(customDelimiterAction(_:)) {
+            if isSummary { return false }
             // Check if current delimiter is a custom one not in the standard list
             if let effective = session?.customDelimiter,
                ![",", "\t", ";", "|", "~"].contains(effective) {
@@ -1344,6 +1769,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 menuItem.state = .off
             }
             return session?.isFullyLoaded ?? false
+        }
+        if menuItem.action == #selector(toggleAnalysisToolbarAction(_:)) {
+            let visible = tvc?.analysisBar?.isToolbarVisible ?? false
+            menuItem.title = visible ? "Hide Analysis Toolbar" : "Show Analysis Toolbar"
+            return tvc != nil
+        }
+        if menuItem.action == #selector(toggleProfilerAction(_:)) {
+            let visible = tvc?.isProfilerVisible ?? false
+            menuItem.title = visible ? "Hide Column Profiler" : "Toggle Column Profiler"
+            return tvc != nil
         }
         return true
     }
@@ -1379,47 +1814,219 @@ extension AppDelegate: NSWindowDelegate {
         }
 
         guard let tab = windowTabs[sender] else { return true }
-        guard let session = tab.fileSession, session.isModified else {
-            // No unsaved changes — allow close immediately
+        guard let session = tab.fileSession else { return true }
+
+        // Summary tabs (Group By results) — prompt to save before closing
+        if session.isSummarySession {
+            showSummaryResultsSavePrompt(for: sender, session: session)
+            return false
+        }
+
+        let hasUnsavedEdits = session.isModified
+        let hasComputedColumns = !session.viewState.computedColumns.isEmpty
+
+        // No unsaved changes and no computed columns — allow close immediately
+        if !hasUnsavedEdits && !hasComputedColumns {
             return true
         }
 
-        // Show save prompt for unsaved changes
-        let filename = session.filePath.lastPathComponent
-        let alert = NSAlert()
-        alert.messageText = "Save changes to \"\(filename)\" before closing?"
-        alert.informativeText = "Your changes will be lost if you don't save them."
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Save")        // First button = .alertFirstButtonReturn
-        alert.addButton(withTitle: "Don't Save")   // Second button = .alertSecondButtonReturn
-        alert.addButton(withTitle: "Cancel")        // Third button = .alertThirdButtonReturn
+        if hasUnsavedEdits {
+            // Show save prompt for unsaved changes
+            let filename = session.filePath.lastPathComponent
+            let alert = NSAlert()
+            alert.messageText = "Save changes to \"\(filename)\" before closing?"
+            alert.informativeText = "Your changes will be lost if you don't save them."
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "Save")        // First button = .alertFirstButtonReturn
+            alert.addButton(withTitle: "Don't Save")   // Second button = .alertSecondButtonReturn
+            alert.addButton(withTitle: "Cancel")        // Third button = .alertThirdButtonReturn
 
-        alert.beginSheetModal(for: sender) { [weak self, weak sender] response in
-            guard let self = self, let sender = sender else { return }
-            switch response {
-            case .alertFirstButtonReturn:
-                // Save, then close
-                session.save { [weak self, weak sender] result in
-                    guard let self = self, let sender = sender else { return }
-                    switch result {
-                    case .success:
+            alert.beginSheetModal(for: sender) { [weak self, weak sender] response in
+                guard let self = self, let sender = sender else { return }
+                switch response {
+                case .alertFirstButtonReturn:
+                    // Save, then close
+                    session.save { [weak self, weak sender] result in
+                        guard let self = self, let sender = sender else { return }
+                        switch result {
+                        case .success:
+                            if hasComputedColumns {
+                                // After saving edits, prompt about computed columns
+                                self.showComputedColumnsSavePrompt(for: sender, session: session)
+                            } else {
+                                self.windowsClosingAfterPrompt.insert(sender)
+                                sender.close()
+                            }
+                        case .failure(let error):
+                            self.showError(error, context: "saving file")
+                        }
+                    }
+                case .alertSecondButtonReturn:
+                    // Don't Save edits
+                    if hasComputedColumns {
+                        // Still prompt about computed columns
+                        self.showComputedColumnsSavePrompt(for: sender, session: session)
+                    } else {
                         self.windowsClosingAfterPrompt.insert(sender)
                         sender.close()
-                    case .failure(let error):
-                        self.showError(error, context: "saving file")
                     }
+                default:
+                    // Cancel — do nothing, keep the window open
+                    break
                 }
+            }
+        } else {
+            // Only computed columns (no unsaved edits) — prompt about computed columns
+            showComputedColumnsSavePrompt(for: sender, session: session)
+        }
+
+        return false // Don't close yet — the alert/save-panel handler will close if needed
+    }
+
+    /// Shows an alert prompting the user to save computed columns before closing.
+    /// Options: "Save As..." (opens NSSavePanel), "Discard" (closes without saving), "Cancel" (stays).
+    private func showComputedColumnsSavePrompt(for window: NSWindow, session: FileSession) {
+        let alert = NSAlert()
+        alert.messageText = "This tab has computed columns."
+        alert.informativeText = "Save a copy with computed values included?"
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Save As…")     // First button = .alertFirstButtonReturn
+        alert.addButton(withTitle: "Discard")       // Second button = .alertSecondButtonReturn
+        alert.addButton(withTitle: "Cancel")        // Third button = .alertThirdButtonReturn
+
+        alert.beginSheetModal(for: window) { [weak self, weak window] response in
+            guard let self = self, let window = window else { return }
+            switch response {
+            case .alertFirstButtonReturn:
+                // Save As — show NSSavePanel
+                self.showComputedColumnsExportPanel(for: window, session: session)
             case .alertSecondButtonReturn:
-                // Don't Save — close without saving
-                self.windowsClosingAfterPrompt.insert(sender)
-                sender.close()
+                // Discard — close without saving computed columns
+                self.windowsClosingAfterPrompt.insert(window)
+                window.close()
             default:
-                // Cancel — do nothing, keep the window open
+                // Cancel — keep the window open
                 break
             }
         }
+    }
 
-        return false // Don't close yet — the alert handler will close if needed
+    /// Shows an NSSavePanel and exports data with computed columns to the chosen path.
+    private func showComputedColumnsExportPanel(for window: NSWindow, session: FileSession) {
+        let savePanel = NSSavePanel()
+        savePanel.allowedContentTypes = [.commaSeparatedText]
+        savePanel.nameFieldStringValue = session.filePath.deletingPathExtension().lastPathComponent + "_computed.csv"
+        savePanel.canCreateDirectories = true
+
+        savePanel.beginSheetModal(for: window) { [weak self, weak window] response in
+            guard let self = self, let window = window else { return }
+            guard response == .OK, let url = savePanel.url else {
+                // User cancelled the save panel — return to the tab (don't close)
+                return
+            }
+
+            // Show progress indicator
+            let progress = NSProgressIndicator(frame: NSRect(x: 0, y: 0, width: 32, height: 32))
+            progress.style = .spinning
+            progress.controlSize = .regular
+            progress.startAnimation(nil)
+            progress.translatesAutoresizingMaskIntoConstraints = false
+
+            let overlay = NSView(frame: window.contentView?.bounds ?? .zero)
+            overlay.wantsLayer = true
+            overlay.layer?.backgroundColor = NSColor(white: 0, alpha: 0.3).cgColor
+            overlay.autoresizingMask = [.width, .height]
+            overlay.addSubview(progress)
+            NSLayoutConstraint.activate([
+                progress.centerXAnchor.constraint(equalTo: overlay.centerXAnchor),
+                progress.centerYAnchor.constraint(equalTo: overlay.centerYAnchor)
+            ])
+            window.contentView?.addSubview(overlay)
+
+            session.exportWithComputedColumns(to: url) { [weak self, weak window, weak overlay] result in
+                overlay?.removeFromSuperview()
+                guard let self = self, let window = window else { return }
+                switch result {
+                case .success:
+                    self.windowsClosingAfterPrompt.insert(window)
+                    window.close()
+                case .failure(let error):
+                    self.showError(error, context: "exporting with computed columns")
+                }
+            }
+        }
+    }
+
+    /// Shows an alert prompting the user to save group-by summary results before closing.
+    /// Options: "Save As…" (opens NSSavePanel), "Don't Save" (closes), "Cancel" (stays).
+    private func showSummaryResultsSavePrompt(for window: NSWindow, session: FileSession) {
+        let alert = NSAlert()
+        alert.messageText = "Save group-by results before closing?"
+        alert.informativeText = "These summary results will be lost when this tab is closed."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Save As…")     // .alertFirstButtonReturn
+        alert.addButton(withTitle: "Don't Save")    // .alertSecondButtonReturn
+        alert.addButton(withTitle: "Cancel")        // .alertThirdButtonReturn
+
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard let self = self else { return }
+            switch response {
+            case .alertFirstButtonReturn:
+                self.showSummaryResultsExportPanel(for: window, session: session)
+            case .alertSecondButtonReturn:
+                self.windowsClosingAfterPrompt.insert(window)
+                window.close()
+            default:
+                break
+            }
+        }
+    }
+
+    /// Shows an NSSavePanel and exports summary results to the chosen path, then closes.
+    private func showSummaryResultsExportPanel(for window: NSWindow, session: FileSession) {
+        let savePanel = NSSavePanel()
+        let baseName = session.filePath.deletingPathExtension().lastPathComponent
+        savePanel.nameFieldStringValue = baseName + "_summary.csv"
+        savePanel.allowedContentTypes = [.commaSeparatedText]
+        savePanel.canCreateDirectories = true
+
+        savePanel.beginSheetModal(for: window) { [weak self, weak window] response in
+            guard let self = self, let window = window else { return }
+            guard response == .OK, let url = savePanel.url else {
+                // User cancelled the save panel — return to the tab (don't close)
+                return
+            }
+
+            // Show progress indicator
+            let progress = NSProgressIndicator(frame: NSRect(x: 0, y: 0, width: 32, height: 32))
+            progress.style = .spinning
+            progress.controlSize = .regular
+            progress.startAnimation(nil)
+            progress.translatesAutoresizingMaskIntoConstraints = false
+
+            let overlay = NSView(frame: window.contentView?.bounds ?? .zero)
+            overlay.wantsLayer = true
+            overlay.layer?.backgroundColor = NSColor(white: 0, alpha: 0.3).cgColor
+            overlay.autoresizingMask = [.width, .height]
+            overlay.addSubview(progress)
+            NSLayoutConstraint.activate([
+                progress.centerXAnchor.constraint(equalTo: overlay.centerXAnchor),
+                progress.centerYAnchor.constraint(equalTo: overlay.centerYAnchor),
+            ])
+            window.contentView?.addSubview(overlay)
+
+            session.exportSummaryResults(to: url) { [weak self, weak window, weak overlay] result in
+                overlay?.removeFromSuperview()
+                guard let self = self, let window = window else { return }
+                switch result {
+                case .success:
+                    self.windowsClosingAfterPrompt.insert(window)
+                    window.close()
+                case .failure(let error):
+                    self.showError(error, context: "exporting summary results")
+                }
+            }
+        }
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -1427,7 +2034,17 @@ extension AppDelegate: NSWindowDelegate {
 
         // Disconnect all delegate/dataSource/target pointers immediately.
         if let tab = windowTabs[win] {
+            // Close floating panels if they belong to this tab's session
+            if let session = tab.fileSession {
+                FrequencyPanelController.closeIfOwned(by: session)
+                ComputedColumnPanelController.closeIfOwned(by: session)
+                GroupByPanelController.closeIfOwned(by: session)
+
+                // Drop the temp table when closing a summary tab (US-023)
+                session.dropSummaryTable()
+            }
             tab.tableViewController?.tearDown()
+            tab.fileSession?.onSummariesComputed = nil
             tab.fileSession?.onModifiedChanged = nil
         }
 

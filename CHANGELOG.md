@@ -5,6 +5,45 @@ All notable changes to Gridka will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6] - 2026-02-27
+
+### Added
+- UI test infrastructure with XCUITest target and env-var based file auto-open hook
+- Shared test helpers (`GridkaTestHelpers.swift`) with `#filePath`-based portable fixture paths
+- Regression tests for async invalidation, stale fetch discard, and scroll stress (20 tests)
+- Crash regression tests for FileSession under concurrent load (3 tests)
+- Accessibility identifiers on status bar, filter bar, search bar for UI test coverage
+- Empty state launch test and data-load verification in UI tests
+
+### Changed
+- Test fixture paths use `#filePath` resolution instead of hardcoded absolute paths
+- UI tests use coordinate-based scroll gestures instead of scroll bar adjustment
+- Bundle ID prefix updated to `org.ceesaxp.gridka`
+
+### Fixed
+- `cb-companies.csv` fixture path pointed to `~/Downloads/` instead of `Tests/`
+
+## [0.5] - 2026-02-15
+
+### Added
+- Column sparklines — mini distribution charts rendered in every column header
+- Column profiler sidebar (`Shift+Cmd+P`) — statistics, distribution histogram, and top values
+- Value frequency panel — histogram and sortable value-count table with click-to-filter
+- Computed columns (`Option+Cmd+F`) — user-defined formula columns using DuckDB SQL expressions with live preview
+- Group By aggregation (`Option+Cmd+G`) — visual builder with column zones, multiple aggregation functions (COUNT, SUM, AVG, MIN, MAX, STDDEV), results open as a new tab
+- Analysis toolbar (`Option+Cmd+T`) — quick access to frequency, profiler, computed column, and group by features
+- Click-to-filter from frequency panel and column profiler
+- Column type badges (color-coded: green=INTEGER, blue=VARCHAR, orange=FLOAT, purple=BOOLEAN, red=DATE)
+- Read-only enforcement on summary/group-by tabs (blocks editing, column mutation, and computed column operations)
+
+### Fixed
+- View-state generation token prevents stale page fetch results from corrupting row cache
+- Single-thread ownership assertions enforce main-thread/serial-queue boundaries
+- SparklineHeaderCell summary lifetime hardened — clears state before column removal
+- Force unwrap/cast crash points eliminated in 6 hot paths (replaced with optional chaining)
+- Row count updates use deterministic completion callbacks instead of timing-based delays
+- Fetch page completions always fire, even for stale generations, preventing fetchingPages bookkeeping leaks
+
 ## [0.4] - 2025-12-15
 
 ### Fixed

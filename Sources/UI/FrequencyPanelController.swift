@@ -1,0 +1,667 @@
+import AppKit
+
+/// Floating NSPanel that displays the value frequency table for a column.
+/// Triggered via: column header context menu → 'Value Frequency…', toolbar Frequency button,
+/// or profiler sidebar 'Show full frequency →' link.
+///
+/// US-010: Container panel. US-011: Sortable frequency table with inline bars and bin toggle.
+/// US-012: Horizontal bar chart alongside table with synchronized scrolling.
+final class FrequencyPanelController: NSWindowController, NSWindowDelegate, NSSplitViewDelegate {
+
+    private static var shared: FrequencyPanelController?
+
+    /// Called when the panel closes (via close button, Escape, or programmatic close).
+    /// Used to sync toolbar button state.
+    static var onClose: (() -> Void)?
+
+    /// Called when user clicks a value row (single-click). Parameters: (column, value, fileSession).
+    static var onValueClicked: ((String, String, FileSession) -> Void)?
+
+    /// Called when user double-clicks a value row (filter + close). Parameters: (column, value, fileSession).
+    static var onValueDoubleClicked: ((String, String, FileSession) -> Void)?
+
+    private let columnName: String
+    private weak var fileSession: FileSession?
+
+    /// Shows the frequency panel for the given column. If a panel is already showing,
+    /// updates it for the new column or brings it to front if same column.
+    static func show(column: String, fileSession: FileSession) {
+        if let existing = shared {
+            if existing.columnName == column {
+                existing.window?.makeKeyAndOrderFront(nil)
+                existing.loadFrequencyData()
+                return
+            }
+            // Different column — close old panel and open new one
+            existing.window?.close()
+            shared = nil
+        }
+        let controller = FrequencyPanelController(column: column, fileSession: fileSession)
+        shared = controller
+        controller.window?.makeKeyAndOrderFront(nil)
+        controller.loadFrequencyData()
+    }
+
+    /// Closes the frequency panel if open.
+    static func closeIfOpen() {
+        shared?.window?.close()
+        shared = nil
+    }
+
+    /// Whether the frequency panel is currently visible.
+    static var isVisible: Bool {
+        return shared?.window?.isVisible ?? false
+    }
+
+    /// Closes the panel if it belongs to the given file session.
+    /// Call when a tab/window closes to avoid orphaned panels.
+    static func closeIfOwned(by session: FileSession) {
+        guard let existing = shared, existing.fileSession === session else { return }
+        existing.window?.close()
+    }
+
+    private init(column: String, fileSession: FileSession) {
+        self.columnName = column
+        self.fileSession = fileSession
+
+        // Determine if column is numeric for bin toggle
+        if let desc = fileSession.columns.first(where: { $0.name == column }) {
+            self.isNumericColumn = desc.displayType == .integer || desc.displayType == .float
+        } else {
+            self.isNumericColumn = false
+        }
+
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 650, height: 400),
+            styleMask: [.titled, .closable, .resizable, .utilityWindow, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.isReleasedWhenClosed = false
+        panel.title = "\(column) — Value Frequency"
+        panel.minSize = NSSize(width: 300, height: 200)
+        panel.level = .floating
+        panel.isFloatingPanel = true
+        panel.becomesKeyOnlyIfNeeded = true
+        panel.collectionBehavior = [.moveToActiveSpace]
+
+        // Position: restore saved or center
+        if let savedFrame = FrequencyPanelController.savedFrame {
+            panel.setFrame(savedFrame, display: false)
+        } else {
+            panel.center()
+        }
+
+        super.init(window: panel)
+        panel.delegate = self
+        setupUI()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    // MARK: - Session Frame Persistence
+
+    /// Frame is remembered within the app session (not persisted to disk).
+    private static var savedFrame: NSRect?
+
+    // MARK: - Data
+
+    /// All frequency rows from the query (unsorted source of truth).
+    private var allRows: [FrequencyRow] = []
+    /// Currently displayed rows (sorted view of allRows).
+    private var displayRows: [FrequencyRow] = []
+    /// Current sort: column identifier and ascending flag.
+    private var sortColumn: String = "cnt"
+    private var sortAscending: Bool = false
+    /// Whether the column is numeric (eligible for bin toggle).
+    private let isNumericColumn: Bool
+    /// Whether bin mode is active.
+    private var isBinned: Bool = false
+    /// Cached max count across all rows (computed once per data load, not per cell render).
+    private var cachedMaxCount: Int = 1
+    /// Generation counter: incremented on each load request. Stale responses are discarded.
+    private var loadGeneration: Int = 0
+    /// Delayed single-click work item — cancelled if a double-click follows.
+    private var pendingClickWorkItem: DispatchWorkItem?
+
+    private struct FrequencyRow {
+        let rank: Int
+        let value: String
+        let count: Int
+        let percentage: Double
+    }
+
+    // MARK: - UI Components
+
+    private var tableView: NSTableView!
+    private var scrollView: NSScrollView!
+    private var splitView: NSSplitView!
+    private var chartView: FrequencyBarChartView!
+    private var chartScrollView: NSScrollView!
+    private var statusLabel: NSTextField!
+    private var binToggle: NSButton?
+    private var spinner: NSProgressIndicator!
+    /// Guard against recursive scroll sync updates.
+    private var isSyncingScroll: Bool = false
+
+    private let countFormatter: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.groupingSeparator = ","
+        return f
+    }()
+
+    private func setupUI() {
+        guard let contentView = window?.contentView else { return }
+
+        // --- Top toolbar area (status + bin toggle) ---
+        let toolbarHeight: CGFloat = 28
+        let toolbar = NSView()
+        toolbar.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(toolbar)
+
+        statusLabel = NSTextField(labelWithString: "Loading…")
+        statusLabel.font = NSFont.systemFont(ofSize: 11)
+        statusLabel.textColor = .secondaryLabelColor
+        statusLabel.translatesAutoresizingMaskIntoConstraints = false
+        toolbar.addSubview(statusLabel)
+
+        spinner = NSProgressIndicator()
+        spinner.style = .spinning
+        spinner.controlSize = .small
+        spinner.isDisplayedWhenStopped = false
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        toolbar.addSubview(spinner)
+        spinner.startAnimation(nil)
+
+        // Bin toggle (only for numeric columns)
+        if isNumericColumn {
+            let toggle = NSButton(checkboxWithTitle: "Bin values", target: self, action: #selector(binToggleChanged))
+            toggle.font = NSFont.systemFont(ofSize: 11)
+            toggle.translatesAutoresizingMaskIntoConstraints = false
+            toggle.state = .off
+            toggle.isHidden = true  // Shown after data loads if >50 distinct values
+            toolbar.addSubview(toggle)
+            binToggle = toggle
+            NSLayoutConstraint.activate([
+                toggle.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
+                toggle.trailingAnchor.constraint(equalTo: toolbar.trailingAnchor, constant: -8),
+            ])
+        }
+
+        NSLayoutConstraint.activate([
+            toolbar.topAnchor.constraint(equalTo: contentView.topAnchor),
+            toolbar.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            toolbar.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            toolbar.heightAnchor.constraint(equalToConstant: toolbarHeight),
+            statusLabel.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor, constant: 8),
+            statusLabel.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
+            spinner.leadingAnchor.constraint(equalTo: statusLabel.trailingAnchor, constant: 6),
+            spinner.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
+        ])
+
+        // --- Table View ---
+        tableView = NSTableView()
+        tableView.style = .plain
+        tableView.usesAlternatingRowBackgroundColors = true
+        tableView.allowsColumnResizing = true
+        tableView.allowsColumnReordering = false
+        tableView.allowsMultipleSelection = false
+        tableView.rowHeight = 22
+        tableView.intercellSpacing = NSSize(width: 8, height: 0)
+        tableView.dataSource = self
+        tableView.delegate = self
+        tableView.target = self
+        tableView.action = #selector(tableRowClicked)
+        tableView.doubleAction = #selector(tableRowDoubleClicked)
+
+        // Create columns: #, Value, Count, %
+        let rankCol = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("rank"))
+        rankCol.title = "#"
+        rankCol.width = 40
+        rankCol.minWidth = 30
+        rankCol.maxWidth = 60
+        rankCol.headerCell.alignment = .right
+        rankCol.sortDescriptorPrototype = NSSortDescriptor(key: "rank", ascending: true)
+        tableView.addTableColumn(rankCol)
+
+        let valueCol = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("value"))
+        valueCol.title = "Value"
+        valueCol.width = 180
+        valueCol.minWidth = 80
+        valueCol.sortDescriptorPrototype = NSSortDescriptor(key: "value", ascending: true)
+        tableView.addTableColumn(valueCol)
+
+        let countCol = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("cnt"))
+        countCol.title = "Count"
+        countCol.width = 100
+        countCol.minWidth = 60
+        countCol.headerCell.alignment = .right
+        countCol.sortDescriptorPrototype = NSSortDescriptor(key: "cnt", ascending: false)
+        tableView.addTableColumn(countCol)
+
+        let pctCol = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("pct"))
+        pctCol.title = "%"
+        pctCol.width = 120
+        pctCol.minWidth = 70
+        pctCol.headerCell.alignment = .right
+        pctCol.sortDescriptorPrototype = NSSortDescriptor(key: "pct", ascending: false)
+        tableView.addTableColumn(pctCol)
+
+        scrollView = NSScrollView()
+        scrollView.documentView = tableView
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+
+        // --- Bar Chart View (right side) ---
+        chartView = FrequencyBarChartView(frame: .zero)
+        chartView.rowHeight = tableView.rowHeight + tableView.intercellSpacing.height
+        // Track the scroll view's width so bars resize when the split divider moves
+        chartView.autoresizingMask = [.width]
+
+        chartScrollView = NSScrollView()
+        chartScrollView.documentView = chartView
+        chartScrollView.hasVerticalScroller = false
+        chartScrollView.hasHorizontalScroller = false
+        chartScrollView.drawsBackground = false
+
+        // --- Split View (table left, chart right) ---
+        splitView = NSSplitView()
+        splitView.isVertical = true
+        splitView.dividerStyle = .thin
+        splitView.delegate = self
+        splitView.translatesAutoresizingMaskIntoConstraints = false
+        splitView.addArrangedSubview(scrollView)
+        splitView.addArrangedSubview(chartScrollView)
+        contentView.addSubview(splitView)
+
+        NSLayoutConstraint.activate([
+            splitView.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
+            splitView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            splitView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            splitView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+        ])
+
+        // Set initial split position (70% table, 30% chart)
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, let sv = self.splitView else { return }
+            let tableWidth = sv.bounds.width * 0.7
+            sv.setPosition(tableWidth, ofDividerAt: 0)
+        }
+
+        // --- Synchronized scrolling ---
+        scrollView.contentView.postsBoundsChangedNotifications = true
+        chartScrollView.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(tableScrollViewDidScroll(_:)),
+            name: NSView.boundsDidChangeNotification,
+            object: scrollView.contentView
+        )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(chartScrollViewDidScroll(_:)),
+            name: NSView.boundsDidChangeNotification,
+            object: chartScrollView.contentView
+        )
+
+        // Set initial sort indicator
+        updateSortIndicators()
+    }
+
+    // MARK: - Scroll Synchronization
+
+    @objc private func tableScrollViewDidScroll(_ notification: Notification) {
+        guard !isSyncingScroll else { return }
+        isSyncingScroll = true
+        let tableOrigin = scrollView.contentView.bounds.origin
+        chartScrollView.contentView.setBoundsOrigin(NSPoint(x: 0, y: tableOrigin.y))
+        chartScrollView.reflectScrolledClipView(chartScrollView.contentView)
+        isSyncingScroll = false
+    }
+
+    @objc private func chartScrollViewDidScroll(_ notification: Notification) {
+        guard !isSyncingScroll else { return }
+        isSyncingScroll = true
+        let chartOrigin = chartScrollView.contentView.bounds.origin
+        scrollView.contentView.setBoundsOrigin(NSPoint(x: scrollView.contentView.bounds.origin.x, y: chartOrigin.y))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+        isSyncingScroll = false
+    }
+
+    // MARK: - NSSplitViewDelegate
+
+    func splitView(_ sv: NSSplitView, constrainMinCoordinate proposedMinimumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
+        // Minimum table width: 200pt
+        return 200
+    }
+
+    func splitView(_ sv: NSSplitView, constrainMaxCoordinate proposedMaximumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
+        // Chart needs at least 80pt
+        return sv.bounds.width - 80
+    }
+
+    // MARK: - Data Loading
+
+    private func loadFrequencyData() {
+        guard let session = fileSession else { return }
+
+        loadGeneration += 1
+        let generation = loadGeneration
+        let requestedBinned = isBinned
+
+        statusLabel.stringValue = "Loading…"
+        spinner.startAnimation(nil)
+
+        if requestedBinned {
+            session.fetchBinnedFrequency(columnName: columnName) { [weak self] result in
+                self?.handleFrequencyResult(result, generation: generation, wasBinned: requestedBinned)
+            }
+        } else {
+            session.fetchFullFrequency(columnName: columnName) { [weak self] result in
+                self?.handleFrequencyResult(result, generation: generation, wasBinned: requestedBinned)
+            }
+        }
+    }
+
+    private func handleFrequencyResult(
+        _ result: Result<FileSession.FrequencyData, Error>,
+        generation: Int,
+        wasBinned: Bool
+    ) {
+        // Discard stale responses from a previous load request
+        guard generation == loadGeneration else { return }
+
+        spinner.stopAnimation(nil)
+
+        switch result {
+        case .success(let data):
+            allRows = data.rows.enumerated().map { (i, row) in
+                FrequencyRow(rank: i + 1, value: row.value, count: row.count, percentage: row.percentage)
+            }
+            cachedMaxCount = allRows.map(\.count).max() ?? 1
+            sortAndReload()
+            let groupLabel = wasBinned ? "bins" : "distinct values"
+            statusLabel.stringValue = "\(allRows.count) \(groupLabel)"
+            // Show bin toggle only for numeric columns with >50 distinct values
+            if isNumericColumn && !wasBinned {
+                binToggle?.isHidden = allRows.count <= 50
+            }
+        case .failure(let error):
+            allRows = []
+            displayRows = []
+            tableView.reloadData()
+            updateBarChart()
+            statusLabel.stringValue = "Error: \(error.localizedDescription)"
+        }
+    }
+
+    // MARK: - Sorting
+
+    private func sortAndReload() {
+        let asc = sortAscending
+        let col = sortColumn
+        displayRows = allRows.sorted { a, b in
+            switch col {
+            case "rank":
+                return asc ? a.rank < b.rank : a.rank > b.rank
+            case "value":
+                let cmp = a.value.localizedCaseInsensitiveCompare(b.value)
+                return asc ? cmp == .orderedAscending : cmp == .orderedDescending
+            case "cnt":
+                return asc ? a.count < b.count : a.count > b.count
+            case "pct":
+                return asc ? a.percentage < b.percentage : a.percentage > b.percentage
+            default:
+                return asc ? a.count < b.count : a.count > b.count
+            }
+        }
+        tableView.reloadData()
+        updateBarChart()
+    }
+
+    private func updateBarChart() {
+        let bars = displayRows.map { FrequencyBarChartView.Bar(value: $0.value, count: $0.count) }
+        // Match the table header height so bars align with table rows
+        chartView.headerOffset = tableView.headerView?.frame.height ?? 0
+        chartView.update(bars: bars, maxCount: cachedMaxCount)
+        // Resize the chart document view to match content height
+        let chartHeight = chartView.intrinsicContentSize.height
+        chartView.frame = NSRect(x: 0, y: 0, width: chartScrollView.contentView.bounds.width, height: max(chartHeight, chartScrollView.contentView.bounds.height))
+    }
+
+    private func updateSortIndicators() {
+        for col in tableView.tableColumns {
+            let id = col.identifier.rawValue
+            if id == sortColumn {
+                let indicator = sortAscending ? NSImage(named: "NSAscendingSortIndicator") : NSImage(named: "NSDescendingSortIndicator")
+                tableView.setIndicatorImage(indicator, in: col)
+                tableView.highlightedTableColumn = col
+            } else {
+                tableView.setIndicatorImage(nil, in: col)
+            }
+        }
+    }
+
+    // MARK: - Actions
+
+    @objc private func binToggleChanged() {
+        isBinned = binToggle?.state == .on
+        loadFrequencyData()
+    }
+
+    @objc private func tableRowClicked() {
+        let row = tableView.clickedRow
+        guard row >= 0, row < displayRows.count, !isBinned,
+              let session = fileSession else { return }
+        let value = displayRows[row].value
+        let col = columnName
+        // Delay single-click so a double-click can cancel it and avoid duplicate filter application
+        pendingClickWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.pendingClickWorkItem = nil
+            FrequencyPanelController.onValueClicked?(col, value, session)
+        }
+        pendingClickWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + NSEvent.doubleClickInterval, execute: workItem)
+    }
+
+    @objc private func tableRowDoubleClicked() {
+        // Cancel the pending single-click to avoid duplicate filter application
+        pendingClickWorkItem?.cancel()
+        pendingClickWorkItem = nil
+        let row = tableView.clickedRow
+        guard row >= 0, row < displayRows.count, !isBinned,
+              let session = fileSession else { return }
+        let value = displayRows[row].value
+        FrequencyPanelController.onValueDoubleClicked?(columnName, value, session)
+    }
+
+    // MARK: - NSWindowDelegate
+
+    func windowWillClose(_ notification: Notification) {
+        // Cancel any pending delayed single-click action
+        pendingClickWorkItem?.cancel()
+        pendingClickWorkItem = nil
+        // Save frame for position persistence within session
+        if let frame = window?.frame {
+            FrequencyPanelController.savedFrame = frame
+        }
+        // Clean up scroll sync observers
+        NotificationCenter.default.removeObserver(self, name: NSView.boundsDidChangeNotification, object: scrollView?.contentView)
+        NotificationCenter.default.removeObserver(self, name: NSView.boundsDidChangeNotification, object: chartScrollView?.contentView)
+        FrequencyPanelController.shared = nil
+        FrequencyPanelController.onClose?()
+    }
+
+    func windowDidMove(_ notification: Notification) {
+        if let frame = window?.frame {
+            FrequencyPanelController.savedFrame = frame
+        }
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        if let frame = window?.frame {
+            FrequencyPanelController.savedFrame = frame
+        }
+    }
+}
+
+// MARK: - NSTableViewDataSource
+
+extension FrequencyPanelController: NSTableViewDataSource {
+
+    func numberOfRows(in tableView: NSTableView) -> Int {
+        return displayRows.count
+    }
+
+    func tableView(_ tableView: NSTableView, sortDescriptorsDidChange oldDescriptors: [NSSortDescriptor]) {
+        guard let descriptor = tableView.sortDescriptors.first, let key = descriptor.key else { return }
+        if key == sortColumn {
+            sortAscending = descriptor.ascending
+        } else {
+            sortColumn = key
+            sortAscending = descriptor.ascending
+        }
+        updateSortIndicators()
+        sortAndReload()
+    }
+}
+
+// MARK: - NSTableViewDelegate
+
+extension FrequencyPanelController: NSTableViewDelegate {
+
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        guard let tableColumn = tableColumn, row < displayRows.count else { return nil }
+        let id = tableColumn.identifier
+        let freqRow = displayRows[row]
+
+        switch id.rawValue {
+        case "rank":
+            let cell = reuseOrCreateTextField(tableView: tableView, id: id)
+            cell.stringValue = "\(freqRow.rank)"
+            cell.alignment = .right
+            cell.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+            cell.textColor = .secondaryLabelColor
+            return cell
+
+        case "value":
+            let cell = reuseOrCreateTextField(tableView: tableView, id: id)
+            cell.stringValue = freqRow.value
+            cell.alignment = .left
+            cell.font = NSFont.systemFont(ofSize: 11)
+            cell.textColor = .labelColor
+            cell.lineBreakMode = .byTruncatingTail
+            cell.toolTip = freqRow.value
+            return cell
+
+        case "cnt":
+            let cell = reuseOrCreateBarCell(tableView: tableView, id: id)
+            cell.configure(
+                count: freqRow.count,
+                maxCount: cachedMaxCount,
+                formattedCount: countFormatter.string(from: NSNumber(value: freqRow.count)) ?? "\(freqRow.count)"
+            )
+            return cell
+
+        case "pct":
+            let cell = reuseOrCreateTextField(tableView: tableView, id: id)
+            cell.stringValue = String(format: "%.1f%%", freqRow.percentage)
+            cell.alignment = .right
+            cell.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+            cell.textColor = .labelColor
+            return cell
+
+        default:
+            return nil
+        }
+    }
+
+    private func reuseOrCreateTextField(tableView: NSTableView, id: NSUserInterfaceItemIdentifier) -> NSTextField {
+        if let existing = tableView.makeView(withIdentifier: id, owner: self) as? NSTextField {
+            return existing
+        }
+        let tf = NSTextField()
+        tf.identifier = id
+        tf.isBezeled = false
+        tf.drawsBackground = false
+        tf.isEditable = false
+        tf.isSelectable = false
+        tf.cell?.truncatesLastVisibleLine = true
+        tf.cell?.lineBreakMode = .byTruncatingTail
+        return tf
+    }
+
+    private func reuseOrCreateBarCell(tableView: NSTableView, id: NSUserInterfaceItemIdentifier) -> FrequencyBarCellView {
+        let barId = NSUserInterfaceItemIdentifier(id.rawValue + "_bar")
+        if let existing = tableView.makeView(withIdentifier: barId, owner: self) as? FrequencyBarCellView {
+            return existing
+        }
+        let cell = FrequencyBarCellView()
+        cell.identifier = barId
+        return cell
+    }
+}
+
+// MARK: - FrequencyBarCellView
+
+/// Custom cell view that shows a colored inline percentage bar with a count label overlay.
+private final class FrequencyBarCellView: NSView {
+
+    override var isFlipped: Bool { true }
+
+    private let barLayer = CALayer()
+    private let countLabel: NSTextField = {
+        let tf = NSTextField()
+        tf.isBezeled = false
+        tf.drawsBackground = false
+        tf.isEditable = false
+        tf.isSelectable = false
+        tf.alignment = .right
+        tf.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+        tf.textColor = .labelColor
+        tf.cell?.truncatesLastVisibleLine = true
+        tf.translatesAutoresizingMaskIntoConstraints = false
+        return tf
+    }()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.addSublayer(barLayer)
+        barLayer.cornerRadius = 2
+        addSubview(countLabel)
+        NSLayoutConstraint.activate([
+            countLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -2),
+            countLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            countLabel.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 2),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    func configure(count: Int, maxCount: Int, formattedCount: String) {
+        countLabel.stringValue = formattedCount
+        let proportion = maxCount > 0 ? CGFloat(count) / CGFloat(maxCount) : 0
+        barProportion = proportion
+        needsLayout = true
+    }
+
+    private var barProportion: CGFloat = 0
+
+    override func layout() {
+        super.layout()
+        let h = bounds.height
+        let barH: CGFloat = max(h - 6, 8)
+        let barY: CGFloat = (h - barH) / 2
+        let barW = max(bounds.width * barProportion, 0)
+        barLayer.frame = CGRect(x: 0, y: barY, width: barW, height: barH)
+        barLayer.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.2).cgColor
+    }
+}

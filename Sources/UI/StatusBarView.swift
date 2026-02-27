@@ -99,6 +99,8 @@ final class StatusBarView: NSView {
     private func setup() {
         // Frame is managed by the parent container, not Auto Layout.
         // Internal labels use Auto Layout within this view's bounds.
+        setAccessibilityIdentifier("statusBar")
+        rowCountLabel.setAccessibilityIdentifier("statusBarRowCount")
         addSubview(separator)
         addSubview(rowCountLabel)
         addSubview(fileSizeLabel)

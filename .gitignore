@@ -18,3 +18,5 @@ Libraries/duckdb.hpp
 
 # macOS
 .DS_Store
+*.zip
+*.log

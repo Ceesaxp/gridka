@@ -9,8 +9,12 @@ final class TableViewController: NSViewController {
     private(set) var statusBar: StatusBarView!
     private(set) var filterBar: FilterBarView!
     private(set) var searchBar: SearchBarView!
+    private(set) var analysisBar: AnalysisToolbarView!
     private(set) var detailPane: DetailPaneView!
+    private(set) var profilerSidebar: ProfilerSidebarView!
     private var splitView: NSSplitView!
+    /// Outer horizontal split view: left = main content (splitView), right = profiler sidebar.
+    private var outerSplitView: NSSplitView!
 
     /// Called when the user changes sort via column header clicks.
     var onSortChanged: (([SortColumn]) -> Void)?
@@ -55,6 +59,12 @@ final class TableViewController: NSViewController {
     /// Whether the detail pane is visible.
     private var isDetailPaneVisible = true
 
+    /// Whether the profiler sidebar is visible.
+    private(set) var isProfilerVisible = false
+
+    /// Debounce work item for profiler queries when clicking rapidly between columns.
+    private var profilerDebounceWorkItem: DispatchWorkItem?
+
     /// Currently highlighted cell view for visual feedback.
     private weak var highlightedCellView: NSView?
 
@@ -76,6 +86,35 @@ final class TableViewController: NSViewController {
 
     /// Called when a column is deleted via the header context menu. Parameter: columnName.
     var onColumnDeleted: ((String) -> Void)?
+
+    /// Called when a column is selected via header click. Parameter: columnName (nil to deselect).
+    var onColumnSelected: ((String?) -> Void)?
+
+    /// Called when 'Value Frequency...' is selected in the header context menu. Parameter: columnName.
+    var onValueFrequency: ((String) -> Void)?
+
+    /// Called when a sparkline is clicked in a column header. Parameter: columnName.
+    /// This should select the column AND open the profiler sidebar.
+    var onSparklineClicked: ((String) -> Void)?
+
+    /// Called when an analysis feature button is toggled. Parameters: (feature, isActive).
+    var onAnalysisFeatureToggled: ((AnalysisFeature, Bool) -> Void)?
+
+    /// Called when 'Remove Computed Column' is selected from the header context menu.
+    var onComputedColumnRemoved: ((String) -> Void)?
+
+    /// Names of computed columns currently displayed.
+    private var computedColumnNames: Set<String> = []
+
+    /// Monotonic counter incremented in configureColumns(). Used by updateSparklines()
+    /// to discard stale onSummariesComputed callbacks that arrive after a column reconfigure (US-103).
+    private var columnConfigGeneration: Int = 0
+
+    /// Tracks the previous sparkline setting to detect transitions in settingsDidChange.
+    private var sparklinesWereEnabled: Bool = SettingsManager.shared.showSparklines
+
+    /// Standard header height when sparklines are disabled.
+    private static let standardHeaderHeight: CGFloat = 22
 
     /// Row number gutter view.
     private var rowNumberView: RowNumberView?
@@ -135,10 +174,12 @@ final class TableViewController: NSViewController {
         tableView.intercellSpacing = NSSize(width: 8, height: 2)
         tableView.dataSource = self
         tableView.delegate = self
+        tableView.setAccessibilityIdentifier("mainTableView")
 
         // Custom header view for double-click auto-fit
         let customHeader = AutoFitTableHeaderView(tableViewController: self)
         tableView.headerView = customHeader
+        updateHeaderHeight()
 
         // Right-click menu for column headers
         let headerMenu = NSMenu()
@@ -161,6 +202,7 @@ final class TableViewController: NSViewController {
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = true
         scrollView.autohidesScrollers = true
+        scrollView.setAccessibilityIdentifier("mainTableScrollView")
 
         filterBar = FilterBarView()
         filterBar.onFilterRemoved = { [weak self] removedFilter in
@@ -178,10 +220,34 @@ final class TableViewController: NSViewController {
             self?.view.window?.makeFirstResponder(self?.tableView)
         }
 
+        analysisBar = AnalysisToolbarView()
+        analysisBar.onFeatureToggled = { [weak self] feature, isActive in
+            self?.onAnalysisFeatureToggled?(feature, isActive)
+        }
+
         statusBar = StatusBarView()
         detailPane = DetailPaneView()
+        profilerSidebar = ProfilerSidebarView()
 
-        // Split view: top = scroll view with table, bottom = detail pane
+        // Wire top values click-to-filter: clicking a value adds an equals filter
+        profilerSidebar.topValuesView.onValueClicked = { [weak self] value in
+            guard let self = self, let session = self.fileSession,
+                  let selectedCol = session.viewState.selectedColumn else { return }
+            // Replace any existing filter for this column with the new equals filter
+            var filters = session.viewState.filters
+            filters.removeAll { $0.column == selectedCol }
+            filters.append(ColumnFilter(column: selectedCol, operator: .equals, value: .string(value)))
+            self.onFiltersChanged?(filters)
+        }
+
+        // Wire "Show full frequency" link — routes through onValueFrequency callback
+        profilerSidebar.topValuesView.onShowFullFrequency = { [weak self] in
+            guard let self = self, let session = self.fileSession,
+                  let selectedCol = session.viewState.selectedColumn else { return }
+            self.onValueFrequency?(selectedCol)
+        }
+
+        // Inner split view: top = scroll view with table, bottom = detail pane
         splitView = NSSplitView()
         splitView.isVertical = false
         splitView.dividerStyle = .thin
@@ -193,17 +259,34 @@ final class TableViewController: NSViewController {
         splitView.setHoldingPriority(.defaultHigh, forSubviewAt: 1)
         splitView.delegate = self
 
+        // Outer split view: left = main content (splitView), right = profiler sidebar
+        outerSplitView = NSSplitView()
+        outerSplitView.isVertical = true
+        outerSplitView.dividerStyle = .thin
+        outerSplitView.identifier = NSUserInterfaceItemIdentifier("outerSplitView")
+        outerSplitView.addSubview(splitView)
+        outerSplitView.addSubview(profilerSidebar)
+        outerSplitView.adjustSubviews()
+        outerSplitView.setHoldingPriority(.defaultLow, forSubviewAt: 0)
+        outerSplitView.setHoldingPriority(.defaultHigh, forSubviewAt: 1)
+        outerSplitView.delegate = self
+
+        // Profiler sidebar starts hidden
+        profilerSidebar.isHidden = true
+
         // Add children to container — GridkaContainerView handles layout.
         // Order matters for z-ordering: bars are added last so they draw
         // on top of the split view when they become visible.
         container.filterBar = filterBar
         container.searchBar = searchBar
-        container.splitView = splitView
+        container.analysisBar = analysisBar
+        container.splitView = outerSplitView
         container.statusBar = statusBar
-        container.addSubview(splitView)
+        container.addSubview(outerSplitView)
         container.addSubview(statusBar)
         container.addSubview(filterBar)
         container.addSubview(searchBar)
+        container.addSubview(analysisBar)
 
         self.view = container
 
@@ -224,11 +307,36 @@ final class TableViewController: NSViewController {
             object: nil
         )
         updateFormattersFromSettings()
+
+        // Restore analysis toolbar visibility from persisted settings
+        if SettingsManager.shared.analysisToolbarVisible {
+            analysisBar.setVisible(true)
+        }
+
+        // Restore profiler sidebar visibility from persisted settings
+        if SettingsManager.shared.profilerSidebarVisible {
+            showProfilerSidebar(animated: false)
+            analysisBar.setFeatureActive(.profiler, active: true)
+        }
     }
 
     @objc private func settingsDidChange(_ notification: Notification) {
         updateFormattersFromSettings()
         reloadVisibleRows()
+
+        let sparklinesEnabled = SettingsManager.shared.showSparklines
+        if sparklinesEnabled != sparklinesWereEnabled {
+            sparklinesWereEnabled = sparklinesEnabled
+            if sparklinesEnabled {
+                updateHeaderHeight()
+                fileSession?.computeColumnSummaries()
+            } else {
+                for col in tableView.tableColumns {
+                    (col.headerCell as? SparklineHeaderCell)?.clearSummary()
+                }
+                updateHeaderHeight()
+            }
+        }
     }
 
     private func updateFormattersFromSettings() {
@@ -248,6 +356,15 @@ final class TableViewController: NSViewController {
         }
 
         dateFormatter.dateFormat = settings.dateFormat.rawValue
+    }
+
+    private func updateHeaderHeight() {
+        let height: CGFloat = SettingsManager.shared.showSparklines
+            ? SparklineHeaderCell.totalHeaderHeight
+            : Self.standardHeaderHeight
+        tableView.headerView?.frame.size.height = height
+        tableView.tile()
+        tableView.headerView?.needsDisplay = true
     }
 
     override func viewDidLayout() {
@@ -272,6 +389,13 @@ final class TableViewController: NSViewController {
     func tearDown() {
         NotificationCenter.default.removeObserver(self)
         cancelEdit()
+
+        // Clear sparkline summaries from all header cells before the table view
+        // is released — prevents dangling ColumnSummary pointers during dealloc.
+        for col in tableView.tableColumns {
+            (col.headerCell as? SparklineHeaderCell)?.clearSummary()
+        }
+
         tableView.dataSource = nil
         tableView.delegate = nil
         tableView.target = nil
@@ -280,6 +404,7 @@ final class TableViewController: NSViewController {
         tableView.menu?.delegate = nil
         tableView.headerView?.menu?.delegate = nil
         splitView.delegate = nil
+        outerSplitView.delegate = nil
         fileSession = nil
         view.removeFromSuperview()
     }
@@ -294,10 +419,22 @@ final class TableViewController: NSViewController {
         // Remember all descriptors (excluding _gridka_rowid) for hide/show management
         allColumnDescriptors = columns.filter { $0.name != "_gridka_rowid" }
 
+        // Bump column configuration generation so in-flight sparkline updates are discarded (US-103)
+        columnConfigGeneration += 1
+
+        // Clear sparkline data on old header cells before removal to prevent stale draws
+        // during header cell teardown/deallocation (US-103).
+        for col in tableView.tableColumns {
+            (col.headerCell as? SparklineHeaderCell)?.clearSummary()
+        }
+
         // Remove existing columns
         while let col = tableView.tableColumns.last {
             tableView.removeTableColumn(col)
         }
+
+        // Clear computed column tracking — will be repopulated from current ViewState below
+        computedColumnNames.removeAll()
 
         for descriptor in allColumnDescriptors {
             // Skip hidden columns
@@ -305,7 +442,79 @@ final class TableViewController: NSViewController {
             tableView.addTableColumn(makeTableColumn(for: descriptor))
         }
 
+        // Re-add any computed columns from current ViewState
+        if let session = fileSession {
+            for cc in session.viewState.computedColumns {
+                let col = makeComputedTableColumn(name: cc.name)
+                tableView.addTableColumn(col)
+                computedColumnNames.insert(cc.name)
+            }
+        }
+
         tableView.reloadData()
+    }
+
+    /// Adds a computed column to the table as the rightmost column.
+    func addComputedColumn(name: String) {
+        let col = makeComputedTableColumn(name: name)
+        tableView.addTableColumn(col)
+        computedColumnNames.insert(name)
+        tableView.reloadData()
+    }
+
+    /// Removes a computed column from the table display.
+    func removeComputedColumn(name: String) {
+        if let col = tableView.tableColumns.first(where: { $0.identifier.rawValue == name }) {
+            // Clear sparkline data before removal (US-103)
+            (col.headerCell as? SparklineHeaderCell)?.clearSummary()
+            tableView.removeTableColumn(col)
+        }
+        computedColumnNames.remove(name)
+        tableView.reloadData()
+    }
+
+    /// Creates an NSTableColumn for a computed column with formula indicator.
+    private func makeComputedTableColumn(name: String) -> NSTableColumn {
+        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(name))
+        column.title = name.uppercased()
+        column.width = max((name as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: NSFont.systemFontSize)]).width + 50, 100)
+        column.minWidth = 50
+        column.maxWidth = 2000
+        column.headerToolTip = "Computed column"
+
+        let sparklineCell = SparklineHeaderCell()
+        column.headerCell = sparklineCell
+
+        // Style with formula indicator (ƒ prefix)
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.alignment = .left
+        paragraphStyle.lineBreakMode = .byTruncatingTail
+
+        let result = NSMutableAttributedString()
+
+        // Formula indicator icon
+        let formulaStr = NSAttributedString(string: "\u{0192} ", attributes: [
+            .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold),
+            .foregroundColor: NSColor.systemPurple,
+        ])
+        result.append(formulaStr)
+
+        // Column name (italic)
+        result.append(NSAttributedString(string: name.uppercased()))
+
+        result.addAttributes([
+            .font: NSFontManager.shared.convert(NSFont.systemFont(ofSize: NSFont.smallSystemFontSize), toHaveTrait: .italicFontMask),
+            .paragraphStyle: paragraphStyle,
+        ], range: NSRange(location: 0, length: result.length))
+
+        // Re-apply formula indicator style (italic overrides it)
+        result.addAttributes([
+            .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold),
+            .foregroundColor: NSColor.systemPurple,
+        ], range: NSRange(location: 0, length: 2))
+
+        column.headerCell.attributedStringValue = result
+        return column
     }
 
     // MARK: - Reload Helpers
@@ -320,15 +529,15 @@ final class TableViewController: NSViewController {
 
     // MARK: - Sort Indicator Updates
 
-    /// Updates column header titles to reflect current sort state.
+    /// Updates column header titles to reflect current sort and selection state.
     func updateSortIndicators() {
         guard let session = fileSession else { return }
         let sortColumns = session.viewState.sortColumns
         let isMultiSort = sortColumns.count > 1
+        let selectedColumn = session.viewState.selectedColumn
 
         for tableColumn in tableView.tableColumns {
             let columnName = tableColumn.identifier.rawValue
-            guard let descriptor = session.columns.first(where: { $0.name == columnName }) else { continue }
 
             var sortSuffix = ""
             if let sortIndex = sortColumns.firstIndex(where: { $0.column == columnName }) {
@@ -341,8 +550,77 @@ final class TableViewController: NSViewController {
                 }
             }
 
-            styleHeaderCell(tableColumn.headerCell, descriptor: descriptor, sortSuffix: sortSuffix)
+            let isSelected = (columnName == selectedColumn)
+
+            if computedColumnNames.contains(columnName) {
+                // Re-style computed column header (preserving formula indicator)
+                styleComputedHeaderCell(tableColumn.headerCell, name: columnName, sortSuffix: sortSuffix, isSelected: isSelected)
+            } else if let descriptor = session.columns.first(where: { $0.name == columnName }) {
+                styleHeaderCell(tableColumn.headerCell, descriptor: descriptor, sortSuffix: sortSuffix, isSelected: isSelected)
+            }
         }
+    }
+
+    /// Updates sparkline data on all column header cells from cached column summaries.
+    /// Called when column summaries finish computing (via onSummariesComputed callback).
+    ///
+    /// Guards against stale callbacks: captures columnConfigGeneration before iterating
+    /// and aborts if it changed (meaning configureColumns was called during iteration,
+    /// which would have cleared and replaced all header cells). (US-103)
+    func updateSparklines() {
+        guard SettingsManager.shared.showSparklines else { return }
+        guard let session = fileSession else { return }
+        let generation = columnConfigGeneration
+        for tableColumn in tableView.tableColumns {
+            // Abort if columns were reconfigured since we started iterating
+            guard columnConfigGeneration == generation else { return }
+            let columnName = tableColumn.identifier.rawValue
+            if let sparklineCell = tableColumn.headerCell as? SparklineHeaderCell {
+                sparklineCell.columnSummary = session.columnSummaries[columnName]
+            }
+        }
+        // Final check before marking header for redisplay
+        guard columnConfigGeneration == generation else { return }
+        tableView.headerView?.needsDisplay = true
+    }
+
+    /// Called by AutoFitTableHeaderView when the user clicks on the sort indicator area
+    /// of a sorted column header. Triggers sort cycling without requiring the Option key.
+    func handleSortIndicatorClick(columnIndex: Int, event: NSEvent) {
+        guard let session = fileSession, session.isFullyLoaded else { return }
+        guard columnIndex >= 0, columnIndex < tableView.tableColumns.count else { return }
+
+        let columnName = tableView.tableColumns[columnIndex].identifier.rawValue
+        var sortColumns = session.viewState.sortColumns
+        let isShiftHeld = event.modifierFlags.contains(.shift)
+
+        if let existingIndex = sortColumns.firstIndex(where: { $0.column == columnName }) {
+            let current = sortColumns[existingIndex]
+            switch current.direction {
+            case .ascending:
+                sortColumns[existingIndex] = SortColumn(column: columnName, direction: .descending)
+            case .descending:
+                sortColumns.remove(at: existingIndex)
+            }
+        } else {
+            if isShiftHeld {
+                sortColumns.append(SortColumn(column: columnName, direction: .ascending))
+            } else {
+                sortColumns = [SortColumn(column: columnName, direction: .ascending)]
+            }
+        }
+
+        onSortChanged?(sortColumns)
+    }
+
+    /// Called when the user clicks in the sparkline area (lower ~16pt) of a column header.
+    /// Selects the column and opens the profiler sidebar if not already open.
+    func handleSparklineClick(columnIndex: Int) {
+        guard let session = fileSession, session.isFullyLoaded else { return }
+        guard columnIndex >= 0, columnIndex < tableView.tableColumns.count else { return }
+
+        let columnName = tableView.tableColumns[columnIndex].identifier.rawValue
+        onSparklineClicked?(columnName)
     }
 
     // MARK: - Filter Management
@@ -519,6 +797,174 @@ final class TableViewController: NSViewController {
         }
     }
 
+    func toggleAnalysisToolbar() {
+        let newVisible = !analysisBar.isToolbarVisible
+        analysisBar.setVisible(newVisible)
+        SettingsManager.shared.analysisToolbarVisible = newVisible
+    }
+
+    // MARK: - Profiler Sidebar
+
+    /// Toggles the profiler sidebar visibility.
+    func toggleProfilerSidebar() {
+        if isProfilerVisible {
+            hideProfilerSidebar(animated: true)
+        } else {
+            showProfilerSidebar(animated: true)
+        }
+        SettingsManager.shared.profilerSidebarVisible = isProfilerVisible
+        // Sync the analysis toolbar Profiler button state
+        analysisBar.setFeatureActive(.profiler, active: isProfilerVisible)
+    }
+
+    /// Shows the profiler sidebar with optional animation.
+    private func showProfilerSidebar(animated: Bool) {
+        guard !isProfilerVisible else { return }
+        isProfilerVisible = true
+        profilerSidebar.isHidden = false
+        outerSplitView.adjustSubviews()
+
+        let targetPosition = max(outerSplitView.bounds.width - 300, 240)
+        if animated {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.2
+                context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                outerSplitView.animator().setPosition(targetPosition, ofDividerAt: 0)
+            }
+        } else {
+            outerSplitView.setPosition(targetPosition, ofDividerAt: 0)
+        }
+
+        // Update the profiler content for current selection
+        updateProfilerSidebar()
+    }
+
+    /// Hides the profiler sidebar with optional animation.
+    private func hideProfilerSidebar(animated: Bool) {
+        guard isProfilerVisible else { return }
+        isProfilerVisible = false
+
+        if animated {
+            NSAnimationContext.runAnimationGroup({ context in
+                context.duration = 0.2
+                context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                outerSplitView.animator().setPosition(outerSplitView.bounds.width, ofDividerAt: 0)
+            }, completionHandler: { [weak self] in
+                guard let self = self, !self.isProfilerVisible else { return }
+                self.profilerSidebar.isHidden = true
+                self.outerSplitView.adjustSubviews()
+            })
+        } else {
+            profilerSidebar.isHidden = true
+            outerSplitView.adjustSubviews()
+        }
+    }
+
+    /// Updates profiler sidebar to reflect the currently selected column.
+    /// Triggers a debounced profiler query (200ms) to fetch overview stats.
+    func updateProfilerSidebar() {
+        guard isProfilerVisible else { return }
+        guard let session = fileSession,
+              let selectedCol = session.viewState.selectedColumn,
+              let descriptor = session.columns.first(where: { $0.name == selectedCol }) else {
+            profilerSidebar.showPlaceholder()
+            // Cancel any pending profiler queries
+            profilerDebounceWorkItem?.cancel()
+            fileSession?.invalidateProfilerQueries()
+            return
+        }
+
+        // Update header immediately
+        profilerSidebar.showColumn(name: descriptor.name, typeName: duckDBTypeName(for: descriptor))
+
+        // Invalidate any in-flight profiler query immediately so stale results
+        // from the previous column are discarded even if they arrive during
+        // the debounce window before the new query fires.
+        profilerDebounceWorkItem?.cancel()
+        session.invalidateProfilerQueries()
+        let columnName = selectedCol
+        let columnType = descriptor.duckDBType
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self = self, let session = self.fileSession else { return }
+            session.fetchOverviewStats(columnName: columnName) { [weak self] result in
+                guard let self = self else { return }
+                switch result {
+                case .success(let stats):
+                    self.profilerSidebar.updateOverviewStats(
+                        totalRows: stats.totalRows,
+                        uniqueCount: stats.uniqueCount,
+                        nullCount: stats.nullCount,
+                        emptyCount: stats.emptyCount
+                    )
+                    // Chain: fetch distribution after overview (needs uniqueCount)
+                    session.fetchDistribution(
+                        columnName: columnName,
+                        columnType: columnType,
+                        uniqueCount: stats.uniqueCount
+                    ) { [weak self] distResult in
+                        guard let self = self else { return }
+                        if case .success(let data) = distResult {
+                            let bars = data.bars.map {
+                                HistogramView.Bar(label: $0.label, count: $0.count, detail: $0.detail)
+                            }
+                            self.profilerSidebar.updateDistribution(
+                                bars: bars,
+                                minLabel: data.minLabel,
+                                maxLabel: data.maxLabel,
+                                trailingNote: data.trailingNote
+                            )
+                        }
+                    }
+                    // Chain: fetch descriptive statistics for numeric columns only
+                    let isNumeric = columnType == .integer || columnType == .bigint ||
+                                    columnType == .float || columnType == .double
+                    if isNumeric {
+                        let isInt = columnType == .integer || columnType == .bigint
+                        session.fetchDescriptiveStats(columnName: columnName) { [weak self] statsResult in
+                            guard let self = self else { return }
+                            if case .success(let ds) = statsResult {
+                                self.profilerSidebar.updateDescriptiveStats(
+                                    min: ds.min, max: ds.max,
+                                    mean: ds.mean, median: ds.median,
+                                    stdDev: ds.stdDev, q1: ds.q1, q3: ds.q3, iqr: ds.iqr,
+                                    isInteger: isInt
+                                )
+                            }
+                        }
+                    } else {
+                        self.profilerSidebar.hideStatisticsSection()
+                    }
+                    // Chain: fetch top values after overview (needs totalRows, nullCount, uniqueCount)
+                    session.fetchTopValues(
+                        columnName: columnName,
+                        totalRows: stats.totalRows,
+                        nullCount: stats.nullCount,
+                        uniqueCount: stats.uniqueCount
+                    ) { [weak self] tvResult in
+                        guard let self = self else { return }
+                        if case .success(let data) = tvResult {
+                            if data.isAllNull {
+                                self.profilerSidebar.hideTopValuesSection()
+                            } else if data.isAllUnique {
+                                self.profilerSidebar.showAllUniqueMessage(uniqueCount: data.uniqueCount)
+                            } else {
+                                let viewRows = data.rows.map {
+                                    TopValuesView.ValueRow(value: $0.value, count: $0.count, percentage: $0.percentage)
+                                }
+                                self.profilerSidebar.updateTopValues(rows: viewRows)
+                            }
+                        }
+                    }
+                case .failure:
+                    // Query failed — keep loading state (may have been cancelled)
+                    break
+                }
+            }
+        }
+        profilerDebounceWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: workItem)
+    }
+
     func updateDetailPane() {
         guard let session = fileSession,
               selectedRow >= 0,
@@ -567,8 +1013,9 @@ final class TableViewController: NSViewController {
 
         let columnName = tableView.tableColumns[clickedCol].identifier.rawValue
 
-        // Don't allow editing the _gridka_rowid column
+        // Don't allow editing the _gridka_rowid column or computed columns
         guard columnName != "_gridka_rowid" else { return }
+        guard !computedColumnNames.contains(columnName) else { return }
 
         beginEditing(row: clickedRow, column: clickedCol, columnName: columnName)
     }
@@ -586,6 +1033,9 @@ final class TableViewController: NSViewController {
         cancelEdit()
 
         guard let session = fileSession else { return }
+
+        // Summary tabs are read-only — don't allow inline editing
+        guard !session.isSummarySession else { return }
 
         // Get the raw value for pre-populating the edit field
         let rawValue: String
@@ -688,9 +1138,10 @@ final class TableViewController: NSViewController {
         let rowCount = session.viewState.totalFilteredRows
         guard columnCount > 0, rowCount > 0 else { return }
 
-        // Build list of editable column indices (skip _gridka_rowid)
+        // Build list of editable column indices (skip _gridka_rowid and computed columns)
         let editableColumns: [Int] = (0..<columnCount).filter { i in
-            tableView.tableColumns[i].identifier.rawValue != "_gridka_rowid"
+            let name = tableView.tableColumns[i].identifier.rawValue
+            return name != "_gridka_rowid" && !computedColumnNames.contains(name)
         }
         guard !editableColumns.isEmpty else { return }
 
@@ -875,7 +1326,10 @@ final class TableViewController: NSViewController {
         hiddenColumns.insert(columnName)
         let identifier = NSUserInterfaceItemIdentifier(columnName)
         if let index = tableView.tableColumns.firstIndex(where: { $0.identifier == identifier }) {
-            tableView.removeTableColumn(tableView.tableColumns[index])
+            let col = tableView.tableColumns[index]
+            // Clear sparkline data before removal (US-103)
+            (col.headerCell as? SparklineHeaderCell)?.clearSummary()
+            tableView.removeTableColumn(col)
         }
     }
 
@@ -1065,13 +1519,25 @@ final class TableViewController: NSViewController {
         // Set tooltip to full DuckDB type name
         column.headerToolTip = duckDBTypeName(for: descriptor)
 
+        // Use SparklineHeaderCell for sparkline rendering in column headers
+        let sparklineCell = SparklineHeaderCell()
+        column.headerCell = sparklineCell
+
+        // Apply column summary if available and sparklines are enabled
+        if SettingsManager.shared.showSparklines,
+           let session = fileSession,
+           let summary = session.columnSummaries[descriptor.name] {
+            sparklineCell.columnSummary = summary
+        }
+
         styleHeaderCell(column.headerCell, descriptor: descriptor)
 
         return column
     }
 
     /// Applies bold font, type icon, and numeric right-alignment to a header cell via attributed string.
-    private func styleHeaderCell(_ headerCell: NSTableHeaderCell, descriptor: ColumnDescriptor, sortSuffix: String = "") {
+    /// When `isSelected` is true, the header cell gets a tinted background color.
+    private func styleHeaderCell(_ headerCell: NSTableHeaderCell, descriptor: ColumnDescriptor, sortSuffix: String = "", isSelected: Bool = false) {
         let isNumeric = descriptor.displayType == .integer || descriptor.displayType == .float
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.alignment = isNumeric ? .right : .left
@@ -1090,7 +1556,62 @@ final class TableViewController: NSViewController {
             .paragraphStyle: paragraphStyle,
         ], range: NSRange(location: 0, length: styled.length))
 
+        // Apply selection tint via background color on the attributed string
+        if isSelected {
+            styled.addAttribute(
+                .backgroundColor,
+                value: NSColor.controlAccentColor.withAlphaComponent(0.15),
+                range: NSRange(location: 0, length: styled.length)
+            )
+        }
+
         headerCell.attributedStringValue = styled
+    }
+
+    /// Styles a computed column header cell with formula indicator, sort suffix, and selection state.
+    private func styleComputedHeaderCell(_ headerCell: NSTableHeaderCell, name: String, sortSuffix: String = "", isSelected: Bool = false) {
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.alignment = .left
+        paragraphStyle.lineBreakMode = .byTruncatingTail
+
+        let result = NSMutableAttributedString()
+
+        // Formula indicator
+        result.append(NSAttributedString(string: "\u{0192} ", attributes: [
+            .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold),
+            .foregroundColor: NSColor.systemPurple,
+        ]))
+
+        // Column name (italic)
+        result.append(NSAttributedString(string: name.uppercased()))
+
+        // Sort suffix
+        if !sortSuffix.isEmpty {
+            result.append(NSAttributedString(string: " \(sortSuffix)"))
+        }
+
+        // Apply italic font to the whole string
+        result.addAttributes([
+            .font: NSFontManager.shared.convert(NSFont.systemFont(ofSize: NSFont.smallSystemFontSize), toHaveTrait: .italicFontMask),
+            .paragraphStyle: paragraphStyle,
+        ], range: NSRange(location: 0, length: result.length))
+
+        // Re-apply formula indicator style
+        result.addAttributes([
+            .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold),
+            .foregroundColor: NSColor.systemPurple,
+        ], range: NSRange(location: 0, length: 2))
+
+        // Apply selection tint
+        if isSelected {
+            result.addAttribute(
+                .backgroundColor,
+                value: NSColor.controlAccentColor.withAlphaComponent(0.15),
+                range: NSRange(location: 0, length: result.length)
+            )
+        }
+
+        headerCell.attributedStringValue = result
     }
 
     private func widthForColumn(_ descriptor: ColumnDescriptor) -> CGFloat {
@@ -1258,30 +1779,36 @@ extension TableViewController: NSTableViewDelegate {
         // Skip if file isn't fully loaded yet
         guard session.isFullyLoaded else { return }
 
-        var sortColumns = session.viewState.sortColumns
-        let isShiftHeld = NSEvent.modifierFlags.contains(.shift)
+        let modifiers = NSEvent.modifierFlags
+        let isOptionHeld = modifiers.contains(.option)
+        let isShiftHeld = modifiers.contains(.shift)
 
-        if let existingIndex = sortColumns.firstIndex(where: { $0.column == columnName }) {
-            let current = sortColumns[existingIndex]
-            switch current.direction {
-            case .ascending:
-                // Second click: switch to descending
-                sortColumns[existingIndex] = SortColumn(column: columnName, direction: .descending)
-            case .descending:
-                // Third click: remove sort
-                sortColumns.remove(at: existingIndex)
-            }
-        } else {
-            if isShiftHeld {
-                // Shift+click: add as secondary/tertiary sort key
-                sortColumns.append(SortColumn(column: columnName, direction: .ascending))
+        if isOptionHeld {
+            // Option+click (or Shift+Option+click): sort by this column
+            var sortColumns = session.viewState.sortColumns
+
+            if let existingIndex = sortColumns.firstIndex(where: { $0.column == columnName }) {
+                let current = sortColumns[existingIndex]
+                switch current.direction {
+                case .ascending:
+                    sortColumns[existingIndex] = SortColumn(column: columnName, direction: .descending)
+                case .descending:
+                    sortColumns.remove(at: existingIndex)
+                }
             } else {
-                // Regular click: replace all sorts with this column ascending
-                sortColumns = [SortColumn(column: columnName, direction: .ascending)]
+                if isShiftHeld {
+                    sortColumns.append(SortColumn(column: columnName, direction: .ascending))
+                } else {
+                    sortColumns = [SortColumn(column: columnName, direction: .ascending)]
+                }
             }
-        }
 
-        onSortChanged?(sortColumns)
+            onSortChanged?(sortColumns)
+        } else {
+            // Plain click: select this column (toggle off if already selected)
+            let newSelection = (session.viewState.selectedColumn == columnName) ? nil : columnName
+            onColumnSelected?(newSelection)
+        }
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
@@ -1358,7 +1885,26 @@ extension TableViewController: NSMenuDelegate {
 
         let tableColumn = tableView.tableColumns[clickedColumnIndex]
         let columnName = tableColumn.identifier.rawValue
-        guard session.columns.contains(where: { $0.name == columnName }) else { return }
+        let isComputed = computedColumnNames.contains(columnName)
+        guard isComputed || session.columns.contains(where: { $0.name == columnName }) else { return }
+
+        // Computed columns get a simplified context menu
+        if isComputed {
+            // Filter option for computed columns
+            let filterItem = NSMenuItem(title: "Filter \"\(columnName)\"…", action: #selector(filterColumnClicked(_:)), keyEquivalent: "")
+            filterItem.target = self
+            filterItem.representedObject = columnName as NSString
+            menu.addItem(filterItem)
+
+            menu.addItem(NSMenuItem.separator())
+
+            // Remove Computed Column option
+            let removeItem = NSMenuItem(title: "Remove Computed Column", action: #selector(removeComputedColumnClicked(_:)), keyEquivalent: "")
+            removeItem.target = self
+            removeItem.representedObject = columnName as NSString
+            menu.addItem(removeItem)
+            return
+        }
 
         // Filter option
         let filterItem = NSMenuItem(title: "Filter \"\(columnName)\"…", action: #selector(filterColumnClicked(_:)), keyEquivalent: "")
@@ -1410,6 +1956,14 @@ extension TableViewController: NSMenuDelegate {
             deleteItem.representedObject = columnName as NSString
             menu.addItem(deleteItem)
         }
+
+        menu.addItem(NSMenuItem.separator())
+
+        // Value Frequency option
+        let frequencyItem = NSMenuItem(title: "Value Frequency…", action: #selector(valueFrequencyClicked(_:)), keyEquivalent: "")
+        frequencyItem.target = self
+        frequencyItem.representedObject = columnName as NSString
+        menu.addItem(frequencyItem)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -1487,8 +2041,18 @@ extension TableViewController: NSMenuDelegate {
 
     @objc private func filterColumnClicked(_ sender: NSMenuItem) {
         guard let columnName = sender.representedObject as? String,
-              let session = fileSession,
-              let descriptor = session.columns.first(where: { $0.name == columnName }) else { return }
+              let session = fileSession else { return }
+
+        // Look up descriptor from base columns, or create a synthetic one for computed columns
+        let descriptor: ColumnDescriptor
+        if let baseDescriptor = session.columns.first(where: { $0.name == columnName }) {
+            descriptor = baseDescriptor
+        } else if computedColumnNames.contains(columnName) {
+            // Computed columns use text display type — provides the broadest filter operators
+            descriptor = ColumnDescriptor(name: columnName, duckDBType: .varchar, displayType: .text, index: -1)
+        } else {
+            return
+        }
 
         guard let headerView = tableView.headerView else { return }
         let columnIndex = tableView.column(withIdentifier: NSUserInterfaceItemIdentifier(columnName))
@@ -1566,6 +2130,16 @@ extension TableViewController: NSMenuDelegate {
         }
     }
 
+    @objc private func removeComputedColumnClicked(_ sender: NSMenuItem) {
+        guard let columnName = sender.representedObject as? String else { return }
+        onComputedColumnRemoved?(columnName)
+    }
+
+    @objc private func valueFrequencyClicked(_ sender: NSMenuItem) {
+        guard let columnName = sender.representedObject as? String else { return }
+        onValueFrequency?(columnName)
+    }
+
     @objc private func hideColumnClicked(_ sender: NSMenuItem) {
         guard let columnName = sender.representedObject as? String else { return }
         hideColumn(columnName)
@@ -1582,18 +2156,29 @@ extension TableViewController: NSMenuDelegate {
 extension TableViewController: NSSplitViewDelegate {
 
     func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimumPosition: CGFloat, ofDividerAt dividerIndex: Int) -> CGFloat {
-        // Table (first pane) needs at least 100pt
+        if splitView === outerSplitView {
+            // Main content area needs at least 300pt
+            return 300
+        }
+        // Inner split: table needs at least 100pt
         return 100
     }
 
     func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposedMaximumPosition: CGFloat, ofDividerAt dividerIndex: Int) -> CGFloat {
-        // Detail pane (second pane) needs at least 60pt
+        if splitView === outerSplitView {
+            // Profiler sidebar needs at least 240pt
+            return splitView.bounds.width - 240
+        }
+        // Inner split: detail pane needs at least 60pt
         return splitView.bounds.height - 60
     }
 
     func splitView(_ splitView: NSSplitView, shouldAdjustSizeOfSubview view: NSView) -> Bool {
-        // Only the table (scrollView) should absorb size changes.
-        // The detail pane keeps its current height when the split view resizes.
+        if splitView === outerSplitView {
+            // Main content absorbs size changes; profiler sidebar keeps its width.
+            return view !== profilerSidebar
+        }
+        // Inner split: table absorbs size changes; detail pane keeps its height.
         return view !== detailPane
     }
 }
@@ -1601,14 +2186,18 @@ extension TableViewController: NSSplitViewDelegate {
 // MARK: - AutoFitTableHeaderView
 
 /// Custom NSTableHeaderView subclass that detects double-clicks on column border
-/// dividers to trigger auto-fit column width.
+/// dividers to trigger auto-fit column width, and routes clicks on the sort indicator
+/// area to sort instead of column select.
 private final class AutoFitTableHeaderView: NSTableHeaderView {
 
     weak var tableViewController: TableViewController?
 
+    /// Width of the clickable sort indicator area on the right side of each header cell.
+    private static let sortIndicatorClickWidth: CGFloat = 24
+
     init(tableViewController: TableViewController) {
         self.tableViewController = tableViewController
-        super.init(frame: NSRect(x: 0, y: 0, width: 0, height: 23))
+        super.init(frame: NSRect(x: 0, y: 0, width: 0, height: SparklineHeaderCell.totalHeaderHeight))
     }
 
     required init?(coder: NSCoder) {
@@ -1616,13 +2205,32 @@ private final class AutoFitTableHeaderView: NSTableHeaderView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        let localPoint = convert(event.locationInWindow, from: nil)
+
         if event.clickCount == 2 {
-            let localPoint = convert(event.locationInWindow, from: nil)
             if let columnIndex = columnBorderIndex(at: localPoint) {
                 tableViewController?.autoFitColumn(at: columnIndex)
                 return
             }
         }
+
+        // Check if click is in the sparkline area (lower ~16pt) of a column header.
+        // This selects the column AND opens the profiler.
+        if event.clickCount == 1, !event.modifierFlags.contains(.option) {
+            if let columnIndex = sparklineColumnIndex(at: localPoint) {
+                tableViewController?.handleSparklineClick(columnIndex: columnIndex)
+                return
+            }
+        }
+
+        // Check if click is in the sort indicator area of a sorted column
+        if event.clickCount == 1, !event.modifierFlags.contains(.option) {
+            if let columnIndex = sortIndicatorColumnIndex(at: localPoint) {
+                tableViewController?.handleSortIndicatorClick(columnIndex: columnIndex, event: event)
+                return
+            }
+        }
+
         super.mouseDown(with: event)
     }
 
@@ -1641,6 +2249,48 @@ private final class AutoFitTableHeaderView: NSTableHeaderView {
         }
         return nil
     }
+
+    /// Returns the column index if the click point is within the sparkline area
+    /// (lower ~16pt) of any column header. Returns nil if the click is in the text area above.
+    private func sparklineColumnIndex(at point: NSPoint) -> Int? {
+        guard let tableView = tableView else { return nil }
+        let sparklineTop = SparklineHeaderCell.totalHeaderHeight - SparklineHeaderCell.sparklineHeight
+        guard point.y >= sparklineTop else { return nil }
+
+        var xOffset: CGFloat = 0
+        for (index, column) in tableView.tableColumns.enumerated() {
+            let columnRight = xOffset + column.width
+            if point.x >= xOffset && point.x <= columnRight {
+                return index
+            }
+            xOffset = columnRight + tableView.intercellSpacing.width
+        }
+        return nil
+    }
+
+    /// Returns the column index if the click point is within the sort indicator area
+    /// (rightmost ~24pt) of a currently-sorted column. Returns nil otherwise.
+    private func sortIndicatorColumnIndex(at point: NSPoint) -> Int? {
+        guard let tableView = tableView,
+              let session = tableViewController?.fileSession else { return nil }
+        let sortColumns = session.viewState.sortColumns
+        guard !sortColumns.isEmpty else { return nil }
+
+        var xOffset: CGFloat = 0
+        for (index, column) in tableView.tableColumns.enumerated() {
+            let columnRight = xOffset + column.width
+            let indicatorLeft = columnRight - Self.sortIndicatorClickWidth
+
+            if point.x >= indicatorLeft && point.x <= columnRight {
+                let columnName = column.identifier.rawValue
+                if sortColumns.contains(where: { $0.column == columnName }) {
+                    return index
+                }
+            }
+            xOffset = columnRight + tableView.intercellSpacing.width
+        }
+        return nil
+    }
 }
 
 // MARK: - GridkaContainerView (frame-based layout)
@@ -1651,6 +2301,7 @@ private final class AutoFitTableHeaderView: NSTableHeaderView {
 final class GridkaContainerView: NSView {
     var filterBar: NSView!
     var searchBar: NSView!
+    var analysisBar: NSView!
     var splitView: NSView!
     var statusBar: NSView!
 
@@ -1667,8 +2318,11 @@ final class GridkaContainerView: NSView {
         let statusH: CGFloat = 22
         let filterH: CGFloat = filterBar.isHidden ? 0 : (filterBar as? FilterBarView)?.currentHeight ?? 0
         let searchH: CGFloat = searchBar.isHidden ? 0 : (searchBar as? SearchBarView)?.currentHeight ?? 0
+        let analysisH: CGFloat = analysisBar?.isHidden ?? true ? 0 : (analysisBar as? AnalysisToolbarView)?.currentHeight ?? 0
 
         var y: CGFloat = 0
+        analysisBar?.frame = NSRect(x: 0, y: y, width: w, height: analysisH)
+        y += analysisH
         filterBar.frame = NSRect(x: 0, y: y, width: w, height: filterH)
         y += filterH
         searchBar.frame = NSRect(x: 0, y: y, width: w, height: searchH)
@@ -1699,7 +2353,7 @@ private extension NSFont {
 private extension NSImage {
     /// Returns a copy of the image tinted with the specified color.
     func tinted(with color: NSColor) -> NSImage {
-        let tinted = self.copy() as! NSImage
+        guard let tinted = self.copy() as? NSImage else { return self }
         tinted.lockFocus()
         color.set()
         let imageRect = NSRect(origin: .zero, size: tinted.size)
@@ -1805,6 +2459,8 @@ final class RowNumberView: NSView {
 
 // MARK: - Previewer
 
+#if false
 #Preview {
     TableViewController()
 }
+#endif

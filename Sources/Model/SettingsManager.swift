@@ -28,6 +28,9 @@ final class SettingsManager {
         static let dateFormat = "GridkaDateFormat"
         static let thousandsSeparator = "GridkaThousandsSeparator"
         static let decimalComma = "GridkaDecimalComma"
+        static let showSparklines = "GridkaShowSparklines"
+        static let analysisToolbarVisible = "GridkaAnalysisToolbarVisible"
+        static let profilerSidebarVisible = "GridkaProfilerSidebarVisible"
     }
 
     private init() {}
@@ -73,6 +76,39 @@ final class SettingsManager {
             if newValue && useThousandsSeparator {
                 UserDefaults.standard.set(false, forKey: Keys.thousandsSeparator)
             }
+            notifyChange()
+        }
+    }
+
+    var showSparklines: Bool {
+        get {
+            if UserDefaults.standard.object(forKey: Keys.showSparklines) == nil {
+                return true
+            }
+            return UserDefaults.standard.bool(forKey: Keys.showSparklines)
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: Keys.showSparklines)
+            notifyChange()
+        }
+    }
+
+    var analysisToolbarVisible: Bool {
+        get {
+            return UserDefaults.standard.bool(forKey: Keys.analysisToolbarVisible)
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: Keys.analysisToolbarVisible)
+            notifyChange()
+        }
+    }
+
+    var profilerSidebarVisible: Bool {
+        get {
+            return UserDefaults.standard.bool(forKey: Keys.profilerSidebarVisible)
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: Keys.profilerSidebarVisible)
             notifyChange()
         }
     }

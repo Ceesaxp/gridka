@@ -6,6 +6,7 @@ enum GridkaError: LocalizedError {
     case queryFailed(String)
     case fileNotFound(String)
     case loadFailed(String)
+    case invalidExpression(String)
 
     var errorDescription: String? {
         switch self {
@@ -19,6 +20,8 @@ enum GridkaError: LocalizedError {
             return "File not found: \(path)"
         case .loadFailed(let message):
             return "Failed to load file: \(message)"
+        case .invalidExpression(let message):
+            return message
         }
     }
 }
