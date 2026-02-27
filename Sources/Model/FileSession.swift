@@ -2023,8 +2023,9 @@ final class FileSession {
         let rows: [[String]]
     }
 
-    /// Returns true if `sql` contains a semicolon outside of single-quoted string literals.
-    /// Handles SQL-standard doubled single quotes (`''`) as an escaped quote inside a literal.
+    /// Returns true if `sql` contains a semicolon outside of single-quoted string literals
+    /// and SQL comments. Handles SQL-standard doubled single quotes (`''`) as an escaped
+    /// quote inside a literal, `--` line comments, and `/* */` block comments.
     static func containsSemicolonOutsideQuotes(_ sql: String) -> Bool {
         var inString = false
         var i = sql.startIndex
@@ -2043,6 +2044,34 @@ final class FileSession {
             } else {
                 if ch == "'" {
                     inString = true
+                } else if ch == "-" {
+                    // Check for -- line comment
+                    let next = sql.index(after: i)
+                    if next < sql.endIndex && sql[next] == "-" {
+                        // Skip to end of line
+                        i = sql.index(after: next)
+                        while i < sql.endIndex && sql[i] != "\n" {
+                            i = sql.index(after: i)
+                        }
+                        continue
+                    }
+                } else if ch == "/" {
+                    // Check for /* block comment */
+                    let next = sql.index(after: i)
+                    if next < sql.endIndex && sql[next] == "*" {
+                        i = sql.index(after: next)
+                        while i < sql.endIndex {
+                            if sql[i] == "*" {
+                                let afterStar = sql.index(after: i)
+                                if afterStar < sql.endIndex && sql[afterStar] == "/" {
+                                    i = sql.index(after: afterStar)
+                                    break
+                                }
+                            }
+                            i = sql.index(after: i)
+                        }
+                        continue
+                    }
                 } else if ch == ";" {
                     return true
                 }
