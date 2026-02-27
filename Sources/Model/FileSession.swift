@@ -815,6 +815,41 @@ final class FileSession {
         }
     }
 
+    /// Exports all rows from the summary temp table to a CSV file via DuckDB COPY.
+    /// Only valid for summary sessions (isSummarySession == true).
+    func exportSummaryResults(to url: URL, completion: @escaping (Result<Void, Error>) -> Void) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        guard let tableName = summaryTableName else {
+            completion(.failure(GridkaError.queryFailed("Not a summary session")))
+            return
+        }
+
+        let exportColumns = columns
+            .filter { $0.name != "_gridka_rowid" }
+            .map { QueryCoordinator.quote($0.name) }
+            .joined(separator: ", ")
+
+        let path = url.path.replacingOccurrences(of: "'", with: "''")
+        let sql = "COPY (SELECT \(exportColumns) FROM \(QueryCoordinator.quote(tableName))) TO '\(path)' (FORMAT CSV, HEADER true, DELIMITER ',', FORCE_QUOTE *)"
+
+        queryQueue.async { [weak self] in
+            do {
+                guard let self = self else {
+                    DispatchQueue.main.async { completion(.failure(GridkaError.queryFailed("Session deallocated"))) }
+                    return
+                }
+                try self.engine.execute(sql)
+                DispatchQueue.main.async {
+                    completion(.success(()))
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    completion(.failure(error))
+                }
+            }
+        }
+    }
+
     // MARK: - Add Column
 
     /// Adds a new column to the data table via ALTER TABLE.

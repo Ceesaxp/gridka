@@ -527,6 +527,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         guard let session = activeTab?.fileSession, session.isFullyLoaded else { return }
         guard let win = activeWindow else { return }
 
+        // Summary sessions export to CSV — no encoding/delimiter accessory needed
+        if session.isSummarySession {
+            let panel = NSSavePanel()
+            let baseName = session.filePath.deletingPathExtension().lastPathComponent
+            panel.nameFieldStringValue = baseName + "_summary.csv"
+            panel.allowedContentTypes = [.commaSeparatedText]
+            panel.canCreateDirectories = true
+
+            panel.beginSheetModal(for: win) { [weak self] response in
+                guard response == .OK, let url = panel.url else { return }
+                session.exportSummaryResults(to: url) { [weak self] result in
+                    if case .failure(let error) = result {
+                        self?.showError(error, context: "exporting summary results")
+                    }
+                }
+            }
+            return
+        }
+
         let panel = NSSavePanel()
         panel.nameFieldStringValue = session.filePath.lastPathComponent
         panel.allowedContentTypes = [
@@ -1669,7 +1688,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             return !isSummary && (session?.isModified ?? false)
         }
         if menuItem.action == #selector(saveAsDocument(_:)) {
-            return !isSummary && (session?.isFullyLoaded ?? false)
+            return session?.isFullyLoaded ?? false
         }
         if menuItem.action == #selector(addColumnAction(_:)) {
             return !isSummary && (session?.isFullyLoaded ?? false)
@@ -1797,8 +1816,11 @@ extension AppDelegate: NSWindowDelegate {
         guard let tab = windowTabs[sender] else { return true }
         guard let session = tab.fileSession else { return true }
 
-        // Summary tabs (Group By results) have no unsaved state — always close immediately
-        if session.isSummarySession { return true }
+        // Summary tabs (Group By results) — prompt to save before closing
+        if session.isSummarySession {
+            showSummaryResultsSavePrompt(for: sender, session: session)
+            return false
+        }
 
         let hasUnsavedEdits = session.isModified
         let hasComputedColumns = !session.viewState.computedColumns.isEmpty
@@ -1930,6 +1952,78 @@ extension AppDelegate: NSWindowDelegate {
                     window.close()
                 case .failure(let error):
                     self.showError(error, context: "exporting with computed columns")
+                }
+            }
+        }
+    }
+
+    /// Shows an alert prompting the user to save group-by summary results before closing.
+    /// Options: "Save As…" (opens NSSavePanel), "Don't Save" (closes), "Cancel" (stays).
+    private func showSummaryResultsSavePrompt(for window: NSWindow, session: FileSession) {
+        let alert = NSAlert()
+        alert.messageText = "Save group-by results before closing?"
+        alert.informativeText = "These summary results will be lost when this tab is closed."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Save As…")     // .alertFirstButtonReturn
+        alert.addButton(withTitle: "Don't Save")    // .alertSecondButtonReturn
+        alert.addButton(withTitle: "Cancel")        // .alertThirdButtonReturn
+
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard let self = self else { return }
+            switch response {
+            case .alertFirstButtonReturn:
+                self.showSummaryResultsExportPanel(for: window, session: session)
+            case .alertSecondButtonReturn:
+                self.windowsClosingAfterPrompt.insert(window)
+                window.close()
+            default:
+                break
+            }
+        }
+    }
+
+    /// Shows an NSSavePanel and exports summary results to the chosen path, then closes.
+    private func showSummaryResultsExportPanel(for window: NSWindow, session: FileSession) {
+        let savePanel = NSSavePanel()
+        let baseName = session.filePath.deletingPathExtension().lastPathComponent
+        savePanel.nameFieldStringValue = baseName + "_summary.csv"
+        savePanel.allowedContentTypes = [.commaSeparatedText]
+        savePanel.canCreateDirectories = true
+
+        savePanel.beginSheetModal(for: window) { [weak self, weak window] response in
+            guard let self = self, let window = window else { return }
+            guard response == .OK, let url = savePanel.url else {
+                // User cancelled the save panel — return to the tab (don't close)
+                return
+            }
+
+            // Show progress indicator
+            let progress = NSProgressIndicator(frame: NSRect(x: 0, y: 0, width: 32, height: 32))
+            progress.style = .spinning
+            progress.controlSize = .regular
+            progress.startAnimation(nil)
+            progress.translatesAutoresizingMaskIntoConstraints = false
+
+            let overlay = NSView(frame: window.contentView?.bounds ?? .zero)
+            overlay.wantsLayer = true
+            overlay.layer?.backgroundColor = NSColor(white: 0, alpha: 0.3).cgColor
+            overlay.autoresizingMask = [.width, .height]
+            overlay.addSubview(progress)
+            NSLayoutConstraint.activate([
+                progress.centerXAnchor.constraint(equalTo: overlay.centerXAnchor),
+                progress.centerYAnchor.constraint(equalTo: overlay.centerYAnchor),
+            ])
+            window.contentView?.addSubview(overlay)
+
+            session.exportSummaryResults(to: url) { [weak self, weak window, weak overlay] result in
+                overlay?.removeFromSuperview()
+                guard let self = self, let window = window else { return }
+                switch result {
+                case .success:
+                    self.windowsClosingAfterPrompt.insert(window)
+                    window.close()
+                case .failure(let error):
+                    self.showError(error, context: "exporting summary results")
                 }
             }
         }
