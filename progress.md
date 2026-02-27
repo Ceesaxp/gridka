@@ -1746,3 +1746,18 @@
   - `extractColumns`, `extractPage`, `extractRowData`, `mapDisplayType` are safe to call from queryQueue — they only operate on their parameters, not on `self.` properties
   - `summaryGeneration` is the sole exception to strict thread ownership — it uses `os_unfair_lock` for cross-thread reads (see US-005)
 ----
+
+## 2026-02-27, 15:09 - US-008 - Harden DuckDB engine lifecycle and unwrap safety
+- Replaced `database!` force unwrap in `DuckDBEngine.init()` with `guard let db = database`
+- Replaced `connection!` force unwrap in `execute()` with `guard let conn = connection` that throws `GridkaError.queryFailed`
+- Replaced `FileManager...first!` force unwrap in `configureDatabaseSettings()` with guard-let that throws `GridkaError.loadFailed`
+- Replaced `FileManager...first!` force unwrap in `FileSession.swift` transcoding path with guard-let that calls completion with failure
+- Added cleanup of native handles (duckdb_disconnect + duckdb_close) when `configureDatabaseSettings()` throws during init (partial initialization failure)
+- Files changed: Sources/Engine/DuckDBEngine.swift, Sources/Model/FileSession.swift, plans/prd.json
+- Build succeeds, all 144 unit tests pass
+- **Learnings for future iterations:**
+  - `DuckDBEngine.init()` had a subtle bug: if `configureDatabaseSettings()` threw, connection and database handles leaked since deinit never runs for a failed init
+  - The `execute()` method is the single choke point for all DuckDB queries — guarding connection there protects the entire query path
+  - `FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first` is practically never nil on macOS, but the force unwrap was a code quality issue worth fixing
+  - FileSession's cache directory usage is in a queryQueue closure with try/catch, so a guard-let with early return + completion(.failure) is the correct pattern there (not throw)
+----
