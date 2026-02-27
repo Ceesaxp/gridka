@@ -1724,3 +1724,25 @@
   - `filteredIndexSet(includeInteger:)` is the idiomatic Swift way to clamp an IndexSet to a range
   - Defense-in-depth: clamping in both `requestPageFetch` (specific) and `reloadRows` (general helper) ensures no path can trigger out-of-bounds NSTableView reloads
 ----
+
+## 2026-02-27, 15:02 - US-007 - Enforce queue ownership by snapshotting main-owned config
+- Audited all `queryQueue.async` closures in FileSession for reads of main-thread-owned state
+- Found 3 data races where main-owned state was read from queryQueue:
+  1. `reload(withEncoding:)` read `self.filePath` from queryQueue (line 542)
+  2. `reload(withEncoding:)` called `self.csvReadParams()` from queryQueue (line 575), reading `hasHeaders` and `customDelimiter`
+  3. `saveAs()` non-UTF-8 path read `self?.hasHeaders` from queryQueue (line 782)
+- Fixed by capturing state into local `let` constants on main thread before `queryQueue.async` dispatch:
+  - `reload(withEncoding:)`: added `capturedFilePath` and `capturedReadParams` snapshots
+  - `saveAs()`: added `capturedHasHeaders` snapshot
+- Updated thread ownership documentation comment with explicit **Snapshotting rule (US-007)** section
+- Added doc comment to `csvReadParams()` noting it must be called on main thread
+- All other `queryQueue.async` dispatches already followed correct pattern (SQL built on main, only engine calls on queryQueue)
+- Files changed: Sources/Model/FileSession.swift, plans/prd.json
+- Build succeeds, all 144 unit tests pass
+- **Learnings for future iterations:**
+  - Most `queryQueue.async` closures in FileSession already correctly snapshot state — the races were only in `reload(withEncoding:)` and `saveAs()` non-UTF-8 path
+  - `csvReadParams()` is the main footgun: it reads `hasHeaders` and `customDelimiter` but looks like a pure utility function
+  - The pattern to follow: call all helper functions that access main-owned state *before* the `queryQueue.async` block, capture their results in `let` constants
+  - `extractColumns`, `extractPage`, `extractRowData`, `mapDisplayType` are safe to call from queryQueue — they only operate on their parameters, not on `self.` properties
+  - `summaryGeneration` is the sole exception to strict thread ownership — it uses `os_unfair_lock` for cross-thread reads (see US-005)
+----

@@ -31,6 +31,15 @@ final class FileSession {
     //     the values they need *before* the async dispatch and return
     //     results back to main via DispatchQueue.main.async.
     //
+    //     **Snapshotting rule (US-007):** Configuration properties like
+    //     `hasHeaders`, `customDelimiter`, `overrideEncoding`, `filePath`,
+    //     `columns`, and `viewState` must be captured into local `let`
+    //     constants on the main thread before the `queryQueue.async`
+    //     dispatch. Helper functions that read these properties (e.g.
+    //     `csvReadParams()`) must likewise be called on the main thread
+    //     and their results captured. This prevents data races when the
+    //     user changes settings while a background query is in flight.
+    //
     // Key public methods assert `dispatchPrecondition(condition: .onQueue(.main))`
     // to catch violations at runtime during development.
     // ─────────────────────────────────────────────────────────────────────
@@ -368,6 +377,7 @@ final class FileSession {
     }
 
     /// Builds the read_csv_auto parameter string with current header/delimiter settings.
+    /// Must be called on the main thread; capture the result before dispatching to queryQueue.
     private func csvReadParams() -> String {
         var params = "ignore_errors = true, header = \(hasHeaders ? "true" : "false")"
         if let delim = customDelimiter {
@@ -532,6 +542,10 @@ final class FileSession {
             return
         }
 
+        // Snapshot main-thread-owned state before dispatching to queryQueue (US-007).
+        let capturedFilePath = filePath
+        let capturedReadParams = csvReadParams()
+
         // For non-UTF-8 encodings: read file, transcode to UTF-8, write temp file, load temp file
         queryQueue.async { [weak self] in
             guard let self = self else { return }
@@ -539,7 +553,7 @@ final class FileSession {
             DispatchQueue.main.async { progress(0.0) }
 
             do {
-                let fileData = try Data(contentsOf: self.filePath)
+                let fileData = try Data(contentsOf: capturedFilePath)
 
                 DispatchQueue.main.async { progress(0.2) }
 
@@ -572,7 +586,7 @@ final class FileSession {
                 // Now reload using the temp file
                 let tempPath = tempFile.path.replacingOccurrences(of: "'", with: "''")
                 let dropSQL = "DROP TABLE IF EXISTS data"
-                let createSQL = "CREATE TABLE data AS SELECT row_number() OVER () AS _gridka_rowid, * FROM read_csv_auto('\(tempPath)', \(self.csvReadParams()))"
+                let createSQL = "CREATE TABLE data AS SELECT row_number() OVER () AS _gridka_rowid, * FROM read_csv_auto('\(tempPath)', \(capturedReadParams))"
                 let countSQL = "SELECT COUNT(*) FROM data"
 
                 try self.engine.execute(dropSQL)
@@ -765,6 +779,8 @@ final class FileSession {
             let colNames = columns
                 .filter { $0.name != "_gridka_rowid" }
                 .map { $0.name }
+            // Snapshot main-thread-owned state before dispatching to queryQueue (US-007).
+            let capturedHasHeaders = hasHeaders
 
             queryQueue.async { [weak self] in
                 do {
@@ -779,7 +795,7 @@ final class FileSession {
                     var lines: [String] = []
 
                     // Header row
-                    if self?.hasHeaders ?? true {
+                    if capturedHasHeaders {
                         let escapedNames = colNames.map { name -> String in
                             if name.contains(delimiter) || name.contains("\"") || name.contains("\n") {
                                 return "\"" + name.replacingOccurrences(of: "\"", with: "\"\"") + "\""
