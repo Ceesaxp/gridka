@@ -46,6 +46,7 @@
 		C90F7FC720259919E3F5D3F8 /* FilterPopoverViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02189A05DDD0014F6A738AB9 /* FilterPopoverViewController.swift */; };
 		CA419263BC8753648BF8C3DA /* AddColumnSheetController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64759D5C280057B7C2DF1ED5 /* AddColumnSheetController.swift */; };
 		CAC9EF562702D91F3B66E4DC /* SparklineHeaderCell.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C680BB6EC932745E979AE6A /* SparklineHeaderCell.swift */; };
+		CCEF99BF940F7DE4EB5EF98C /* SummaryCounterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2DB69E39CDA2D745413C2D2 /* SummaryCounterTests.swift */; };
 		CE345F3ACB130037891E147C /* TopValuesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 428655CECCDD91C856F6EB10 /* TopValuesView.swift */; };
 		D0C41CC8DC6C829F43B6751A /* ProfilerQueryBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C72561B0D6B94EE6B2F0651 /* ProfilerQueryBuilder.swift */; };
 		D1934CC50D6912A6357040E3 /* SettingsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0E67261180C00B6D108F2A8 /* SettingsWindowController.swift */; };
@@ -160,6 +161,7 @@
 		E4EECE9D1DFD8888D7C5E80B /* RowCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RowCacheTests.swift; sourceTree = "<group>"; };
 		E4F611C0100D0E475878D269 /* PreviewProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewProvider.swift; sourceTree = "<group>"; };
 		F0167333A7467F79F5487189 /* FileSessionCrashRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileSessionCrashRegressionTests.swift; sourceTree = "<group>"; };
+		F2DB69E39CDA2D745413C2D2 /* SummaryCounterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SummaryCounterTests.swift; sourceTree = "<group>"; };
 		F8728176BC67BC3E88503A1F /* SettingsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsManager.swift; sourceTree = "<group>"; };
 		F916F23483BAD9488B21BF49 /* headerless.csv */ = {isa = PBXFileReference; path = headerless.csv; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -305,6 +307,7 @@
 				03F6EA6E4B2F86186B51B0CE /* QueryCoordinatorTests.swift */,
 				E4EECE9D1DFD8888D7C5E80B /* RowCacheTests.swift */,
 				E206BCEACC03C5EA52458503 /* StaleReloadClampTests.swift */,
+				F2DB69E39CDA2D745413C2D2 /* SummaryCounterTests.swift */,
 			);
 			path = Tests;
 			sourceTree = "<group>";
@@ -507,6 +510,7 @@
 				44E010CD2BD6D258B7F1D93A /* QueryCoordinatorTests.swift in Sources */,
 				D19D8BF3091F9653AD70D4E2 /* RowCacheTests.swift in Sources */,
 				FD8A62505EB24CA9F19F45E9 /* StaleReloadClampTests.swift in Sources */,
+				CCEF99BF940F7DE4EB5EF98C /* SummaryCounterTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -159,7 +159,19 @@ final class FileSession {
     var isSummarySession: Bool { summaryTableName != nil }
 
     /// Counter for unique summary table names across the app lifetime.
-    private static var summaryCounter = 0
+    /// Protected by `_summaryCounterLock` for thread-safe concurrent access (US-010).
+    private static var _summaryCounter = 0
+    private static var _summaryCounterLock = os_unfair_lock()
+
+    /// Thread-safe increment-and-return for summary counter.
+    /// Returns a unique counter value safe for use as a temp table suffix.
+    private static func nextSummaryCounter() -> Int {
+        os_unfair_lock_lock(&_summaryCounterLock)
+        _summaryCounter += 1
+        let val = _summaryCounter
+        os_unfair_lock_unlock(&_summaryCounterLock)
+        return val
+    }
 
     // MARK: - Init
 
@@ -209,8 +221,7 @@ final class FileSession {
         definition: GroupByDefinition,
         completion: @escaping (Result<FileSession, Error>) -> Void
     ) {
-        summaryCounter += 1
-        let tempName = "summary_\(summaryCounter)"
+        let tempName = "summary_\(nextSummaryCounter())"
 
         let source = sourceSession.queryCoordinator.buildSourceExpression(for: sourceSession.viewState)
         let whereClause = sourceSession.queryCoordinator.buildWhereSQL(for: sourceSession.viewState, columns: sourceSession.columns)

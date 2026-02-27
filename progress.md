@@ -1783,3 +1783,22 @@
   - The existing callers already guard most access with `result.rowCount > 0` checks, but defense-in-depth at the accessor level catches any edge case
   - Each test creates its own DuckDBEngine + table, so tests are fully isolated
 ----
+
+## 2026-02-27, 15:30 - US-010 - Synchronize summary session temp table naming
+- Replaced unprotected `private static var summaryCounter` with lock-protected `_summaryCounter` + `_summaryCounterLock` (`os_unfair_lock`) in FileSession.swift
+- Added `private static func nextSummaryCounter() -> Int` that atomically increments and returns the counter under lock
+- Updated `createSummarySession` callsite to use `nextSummaryCounter()` instead of direct counter mutation
+- Follows the same `os_unfair_lock` pattern already used for `summaryGeneration` (US-005)
+- Created Tests/SummaryCounterTests.swift with 2 stress tests:
+  - `testConcurrentSummarySessionCreationProducesUniqueNames` — 20 concurrent `createSummarySession` calls, verifies all returned sessions have unique `summaryTableName` values
+  - `testSummaryCounterMonotonicity` — 10 concurrent sessions, verifies all numeric suffixes are unique
+- Regenerated Gridka.xcodeproj via xcodegen
+- Files changed: Sources/Model/FileSession.swift, Tests/SummaryCounterTests.swift (new), Gridka.xcodeproj/project.pbxproj (regen), plans/prd.json
+- Build succeeds, all 161 unit tests pass (2 new + 159 existing)
+- **Learnings for future iterations:**
+  - `summaryCounter` was a `private static var` with no synchronization — classic data race on static shared mutable state
+  - The fix pattern mirrors `summaryGeneration` (US-005): `os_unfair_lock` wrapping increment+read in a single atomic operation
+  - `nextSummaryCounter()` is a static method returning `Int`, so callers get a unique value without needing to know about the lock
+  - `createSummarySession` is called from main thread in practice (via `onMain` in AppDelegate), but as a `static func` it has no thread contract — the lock makes it safe regardless
+  - `dropSummaryTable()` uses strong captures of `engine` to ensure cleanup even if `FileSession` deallocates before the queue runs — important for test cleanup too
+----

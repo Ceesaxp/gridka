@@ -152,7 +152,7 @@
         "Tests pass"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "Targets static shared counter race in FileSession summary factory."
     },
     {
