@@ -433,6 +433,11 @@ final class ComputedColumnPanelController: NSWindowController, NSWindowDelegate 
             showError("Expression cannot be empty")
             return false
         }
+        // Same injection guard used by the preview path (FileSession.fetchComputedColumnPreview)
+        if FileSession.containsSemicolonOutsideQuotes(expression) {
+            showError("Expression must not contain semicolons outside of string literals")
+            return false
+        }
         hideError()
         return true
     }

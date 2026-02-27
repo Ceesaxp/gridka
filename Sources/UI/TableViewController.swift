@@ -113,6 +113,11 @@ final class TableViewController: NSViewController {
     /// Tracks the previous sparkline setting to detect transitions in settingsDidChange.
     private var sparklinesWereEnabled: Bool = SettingsManager.shared.showSparklines
 
+    /// Set to `true` by `tearDown()`. Guards `updateSparklines()` and other UI-mutation
+    /// paths so that queued main-thread callbacks arriving after teardown cannot repopulate
+    /// header cell sparkline data on cells that are about to be deallocated. (US-003)
+    private(set) var isTornDown = false
+
     /// Standard header height when sparklines are disabled.
     private static let standardHeaderHeight: CGFloat = 22
 
@@ -321,6 +326,7 @@ final class TableViewController: NSViewController {
     }
 
     @objc private func settingsDidChange(_ notification: Notification) {
+        guard !isTornDown else { return }
         updateFormattersFromSettings()
         reloadVisibleRows()
 
@@ -386,9 +392,21 @@ final class TableViewController: NSViewController {
 
     /// Disconnects all delegate/dataSource/target pointers so the view hierarchy
     /// can be torn down safely after the TVC is released.
+    ///
+    /// **Idempotent** — safe to call more than once. The `isTornDown` flag prevents
+    /// double-cleanup and also blocks `updateSparklines()` from repopulating header
+    /// cells after teardown has started. (US-003)
     func tearDown() {
+        guard !isTornDown else { return }
+        isTornDown = true
+
         NotificationCenter.default.removeObserver(self)
         cancelEdit()
+
+        // Invalidate summaries on the session FIRST — this bumps the generation
+        // counter so any in-flight queryQueue computation will discard its results
+        // rather than dispatching a stale onSummariesComputed callback. (US-003)
+        fileSession?.invalidateColumnSummaries()
 
         // Clear sparkline summaries from all header cells before the table view
         // is released — prevents dangling ColumnSummary pointers during dealloc.
@@ -416,6 +434,8 @@ final class TableViewController: NSViewController {
     // MARK: - Column Configuration
 
     func configureColumns(_ columns: [ColumnDescriptor]) {
+        guard !isTornDown else { return }
+
         // Remember all descriptors (excluding _gridka_rowid) for hide/show management
         allColumnDescriptors = columns.filter { $0.name != "_gridka_rowid" }
 
@@ -524,7 +544,10 @@ final class TableViewController: NSViewController {
     }
 
     func reloadRows(_ rows: IndexSet, columns: IndexSet) {
-        tableView.reloadData(forRowIndexes: rows, columnIndexes: columns)
+        let currentRowCount = tableView.numberOfRows
+        let clamped = rows.filteredIndexSet(includeInteger: { $0 < currentRowCount })
+        guard !clamped.isEmpty else { return }
+        tableView.reloadData(forRowIndexes: clamped, columnIndexes: columns)
     }
 
     // MARK: - Sort Indicator Updates
@@ -568,6 +591,7 @@ final class TableViewController: NSViewController {
     /// and aborts if it changed (meaning configureColumns was called during iteration,
     /// which would have cleared and replaced all header cells). (US-103)
     func updateSparklines() {
+        guard !isTornDown else { return }
         guard SettingsManager.shared.showSparklines else { return }
         guard let session = fileSession else { return }
         let generation = columnConfigGeneration
@@ -1718,9 +1742,15 @@ final class TableViewController: NSViewController {
 
             switch result {
             case .success(let page):
+                let currentRowCount = self.tableView.numberOfRows
                 let startRow = page.startRow
-                let endRow = startRow + page.data.count
-                let rowRange = IndexSet(integersIn: startRow..<endRow)
+                let clampedEnd = min(startRow + page.data.count, currentRowCount)
+
+                // Skip reload entirely if page is outside current row bounds
+                // (stale fetch from before a filter/search reduced the row count)
+                guard startRow < currentRowCount, startRow < clampedEnd else { break }
+
+                let rowRange = IndexSet(integersIn: startRow..<clampedEnd)
                 let colRange = IndexSet(integersIn: 0..<self.tableView.numberOfColumns)
                 self.tableView.reloadData(forRowIndexes: rowRange, columnIndexes: colRange)
             case .failure:

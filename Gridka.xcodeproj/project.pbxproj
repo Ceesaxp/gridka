@@ -1,0 +1,949 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		025D161AFAD18C70038E602A /* DuckDBEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00F214CA34AF0DFD2013C74 /* DuckDBEngine.swift */; };
+		03098BFA16BA2C0C66D633D9 /* TableViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1168207DE5F39A9D60E99322 /* TableViewController.swift */; };
+		08FA83CC46F43CB4F1DFB9E7 /* FileSessionCrashRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0167333A7467F79F5487189 /* FileSessionCrashRegressionTests.swift */; };
+		09196D1921A3B731714C2BF0 /* ColumnDescriptor.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBF535A46B11B725AB239D85 /* ColumnDescriptor.swift */; };
+		0BA303F61CDE98113F15FAE8 /* GridkaTestHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFC3AA1AF674C208ECA378FD /* GridkaTestHelpers.swift */; };
+		103C31890F60E4112AF71FD6 /* DetailPaneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B0B36184783559FAD4B4095 /* DetailPaneView.swift */; };
+		154B9E1CC7B3109F735DF9D6 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 4AC4CD1281A86010B2E91076 /* Assets.xcassets */; };
+		17C2D46174456D3875B8C817 /* GridkaQuickLook.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = BA3AC474FD4995B08A2BFF30 /* GridkaQuickLook.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		17F7AD8BD0ABAD27C9FE5806 /* GridkaError.swift in Sources */ = {isa = PBXBuildFile; fileRef = B700DF94716B4E32883D9802 /* GridkaError.swift */; };
+		1911E12FAFDCB2E7B83116FA /* GridkaUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0D192C82236C2A61F39BF15 /* GridkaUITests.swift */; };
+		1C2E9724C5CF7EE34831387A /* PreviewProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F611C0100D0E475878D269 /* PreviewProvider.swift */; };
+		20E21C5829857898A553B5E8 /* AsyncInvalidationRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 827FB26A316674D273763D8A /* AsyncInvalidationRegressionTests.swift */; };
+		44E010CD2BD6D258B7F1D93A /* QueryCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03F6EA6E4B2F86186B51B0CE /* QueryCoordinatorTests.swift */; };
+		60039A675F99F1A89C44D952 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A13BAF1CD30635DBC5A3C6BB /* AppDelegate.swift */; };
+		611DF393CA57236B7A4BBBB5 /* RenameColumnPopoverController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E553B133E5373521C491798 /* RenameColumnPopoverController.swift */; };
+		6231DE89BF13F756478E2113 /* FilterBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78B4F3196FBFD18EE1CEFE04 /* FilterBarView.swift */; };
+		63285D263445081D0918D2F8 /* GroupByPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E855B5DD828CDC8148B73A2 /* GroupByPanelController.swift */; };
+		6DFB513A6371B55335829428 /* FileSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36BE1292EC44C7C3C6B357F8 /* FileSession.swift */; };
+		717D8CE6633935DAB0DAF4A3 /* SearchBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18BD14A2379A4CF2905D7D7C /* SearchBarView.swift */; };
+		80A7FD7B1EB4B3F189E41278 /* ComputedColumnPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 148A6DDD81329D4341B12A95 /* ComputedColumnPanelController.swift */; };
+		86E80D6DDFFC6D2ED897F268 /* DuckDBResultBoundsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A9FFA4EA1DC35A80DA3BD2A /* DuckDBResultBoundsTests.swift */; };
+		88717FF3150E57A0F42F2712 /* ColumnSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F0514B553D8369EA17C238D /* ColumnSummary.swift */; };
+		8D2333827090BDCE78058109 /* GridkaTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15FCA2638045DB76E9039F92 /* GridkaTests.swift */; };
+		9126A97436F20DDF826CFA7F /* 12data_forex.csv in Resources */ = {isa = PBXBuildFile; fileRef = B190E556873AFF3CA89009D9 /* 12data_forex.csv */; };
+		9525EB05B0ABB5784FA870D6 /* AnalysisToolbarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA6E7A8C10E86F68CF034F69 /* AnalysisToolbarView.swift */; };
+		9528BD460FDC26C5F926A4A4 /* FileSessionShutdownTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE7B19D736DD67D16C4E7A1D /* FileSessionShutdownTests.swift */; };
+		97BB0332452B5D025E29265D /* FrequencyBarChartView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 675C8373DE67B390BDF3D56F /* FrequencyBarChartView.swift */; };
+		9AFB93C489DFDD314F0200BD /* DragDropView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93B49704908BC7FD461AA270 /* DragDropView.swift */; };
+		9C514476BF893E547831A4DC /* SavePanelAccessoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10A445128E17068857A74D6D /* SavePanelAccessoryView.swift */; };
+		A100AD54FC9B8C96ACEAC96F /* ViewState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1948F2C9A6E24B144656D488 /* ViewState.swift */; };
+		A961FD9E79B3EED6E832746A /* ProfilerSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34F32E97C84532FE333CC550 /* ProfilerSidebarView.swift */; };
+		AD760EA59244EAEE9DBF1912 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = BC73BA0F81338640148BCEA9 /* PrivacyInfo.xcprivacy */; };
+		AF4E4BFFF3691EA2AF67AFE9 /* FrequencyPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F5B2E9C45FF7BE9B2E9C7B7 /* FrequencyPanelController.swift */; };
+		B3AE51D9F5131DB47B5DDDE1 /* DuckDBTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = C22180CA047E37DAD0858907 /* DuckDBTypes.swift */; };
+		C335C4285ED0BAF57F46E4B8 /* HelpWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB01BCC199BE389372DD1EC7 /* HelpWindowController.swift */; };
+		C54CC3942888E9611DA63299 /* RowCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8386EE403F8E135B0B6E8392 /* RowCache.swift */; };
+		C90F7FC720259919E3F5D3F8 /* FilterPopoverViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02189A05DDD0014F6A738AB9 /* FilterPopoverViewController.swift */; };
+		CA419263BC8753648BF8C3DA /* AddColumnSheetController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64759D5C280057B7C2DF1ED5 /* AddColumnSheetController.swift */; };
+		CAC9EF562702D91F3B66E4DC /* SparklineHeaderCell.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C680BB6EC932745E979AE6A /* SparklineHeaderCell.swift */; };
+		CCEF99BF940F7DE4EB5EF98C /* SummaryCounterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2DB69E39CDA2D745413C2D2 /* SummaryCounterTests.swift */; };
+		CE345F3ACB130037891E147C /* TopValuesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 428655CECCDD91C856F6EB10 /* TopValuesView.swift */; };
+		D0C41CC8DC6C829F43B6751A /* ProfilerQueryBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C72561B0D6B94EE6B2F0651 /* ProfilerQueryBuilder.swift */; };
+		D1934CC50D6912A6357040E3 /* SettingsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0E67261180C00B6D108F2A8 /* SettingsWindowController.swift */; };
+		D19D8BF3091F9653AD70D4E2 /* RowCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4EECE9D1DFD8888D7C5E80B /* RowCacheTests.swift */; };
+		D41544D8692C6AD39F339803 /* ExpressionInjectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 295CD84B9E7A7445423A459E /* ExpressionInjectionTests.swift */; };
+		E5577C229385C5F5D2D2EA12 /* StatusBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98A7AB533AFA6EF101BC7CA1 /* StatusBarView.swift */; };
+		E62C405830BD0D1F5EC96525 /* HistogramView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C8A563F4BB78B24274859F8 /* HistogramView.swift */; };
+		E87075694F60C341E5122D47 /* large.csv in Resources */ = {isa = PBXBuildFile; fileRef = 126D09110628E6BFA4E1585B /* large.csv */; };
+		EE85A12F8509B1B53AC73E1D /* SettingsManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8728176BC67BC3E88503A1F /* SettingsManager.swift */; };
+		EE9F9BDE9EAEDE34A4C1F516 /* cb-companies.csv in Resources */ = {isa = PBXBuildFile; fileRef = 1CECB8E24CB06B3026E6B2AD /* cb-companies.csv */; };
+		F118F0A9549D0DC798124D20 /* CrashRegressionSuiteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A08E49F2EDFE3A3A8F8F87D /* CrashRegressionSuiteTests.swift */; };
+		F162F68841E98943DAE34E7F /* QueryCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFF1C37E1D3CAE95EF1E42D0 /* QueryCoordinator.swift */; };
+		FA56FC3548B9B272B03721ED /* headerless.csv in Resources */ = {isa = PBXBuildFile; fileRef = F916F23483BAD9488B21BF49 /* headerless.csv */; };
+		FD849E45C2DC289455F834E5 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5046EEEDA6E24A2F5833DD08 /* main.swift */; };
+		FD8A62505EB24CA9F19F45E9 /* StaleReloadClampTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E206BCEACC03C5EA52458503 /* StaleReloadClampTests.swift */; };
+		FF35DBFAD0F2839243FC2CAA /* TabContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 095EE326D464CF571C069CEA /* TabContext.swift */; };
+		FF7FB670A9C0E73E6B8C4004 /* ColumnFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3E385F249B65D4E10830F9A /* ColumnFilter.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		71201DA7B399B6DC858388AF /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C0D920F11430CE6461EBA57E /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = AC6BF206D8D03D6B01C166AC;
+			remoteInfo = Gridka;
+		};
+		7965E50D34E8515D930B20D7 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C0D920F11430CE6461EBA57E /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = AC6BF206D8D03D6B01C166AC;
+			remoteInfo = Gridka;
+		};
+		D3B11A219535A021374BEC74 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C0D920F11430CE6461EBA57E /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B1881C0F227F19FE57584926;
+			remoteInfo = GridkaQuickLook;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		5477F534DAA697A85AC73598 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				17C2D46174456D3875B8C817 /* GridkaQuickLook.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		02189A05DDD0014F6A738AB9 /* FilterPopoverViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilterPopoverViewController.swift; sourceTree = "<group>"; };
+		03F6EA6E4B2F86186B51B0CE /* QueryCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueryCoordinatorTests.swift; sourceTree = "<group>"; };
+		095EE326D464CF571C069CEA /* TabContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabContext.swift; sourceTree = "<group>"; };
+		0C8A563F4BB78B24274859F8 /* HistogramView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistogramView.swift; sourceTree = "<group>"; };
+		10A445128E17068857A74D6D /* SavePanelAccessoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavePanelAccessoryView.swift; sourceTree = "<group>"; };
+		1168207DE5F39A9D60E99322 /* TableViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TableViewController.swift; sourceTree = "<group>"; };
+		126D09110628E6BFA4E1585B /* large.csv */ = {isa = PBXFileReference; path = large.csv; sourceTree = "<group>"; };
+		148A6DDD81329D4341B12A95 /* ComputedColumnPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComputedColumnPanelController.swift; sourceTree = "<group>"; };
+		15FCA2638045DB76E9039F92 /* GridkaTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GridkaTests.swift; sourceTree = "<group>"; };
+		18BD14A2379A4CF2905D7D7C /* SearchBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchBarView.swift; sourceTree = "<group>"; };
+		1948F2C9A6E24B144656D488 /* ViewState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewState.swift; sourceTree = "<group>"; };
+		1CECB8E24CB06B3026E6B2AD /* cb-companies.csv */ = {isa = PBXFileReference; path = "cb-companies.csv"; sourceTree = "<group>"; };
+		1E553B133E5373521C491798 /* RenameColumnPopoverController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenameColumnPopoverController.swift; sourceTree = "<group>"; };
+		295CD84B9E7A7445423A459E /* ExpressionInjectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExpressionInjectionTests.swift; sourceTree = "<group>"; };
+		2C71D93679EE4326E40DE343 /* Gridka.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Gridka.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		2E855B5DD828CDC8148B73A2 /* GroupByPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupByPanelController.swift; sourceTree = "<group>"; };
+		34F32E97C84532FE333CC550 /* ProfilerSidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfilerSidebarView.swift; sourceTree = "<group>"; };
+		36241D62915EDB2349369A0E /* GridkaTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = GridkaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		36BE1292EC44C7C3C6B357F8 /* FileSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileSession.swift; sourceTree = "<group>"; };
+		3EFEA56E058198CE00FF1896 /* GridkaUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = GridkaUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		3F0514B553D8369EA17C238D /* ColumnSummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColumnSummary.swift; sourceTree = "<group>"; };
+		428655CECCDD91C856F6EB10 /* TopValuesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopValuesView.swift; sourceTree = "<group>"; };
+		4A08E49F2EDFE3A3A8F8F87D /* CrashRegressionSuiteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrashRegressionSuiteTests.swift; sourceTree = "<group>"; };
+		4AC4CD1281A86010B2E91076 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		4C680BB6EC932745E979AE6A /* SparklineHeaderCell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SparklineHeaderCell.swift; sourceTree = "<group>"; };
+		5046EEEDA6E24A2F5833DD08 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
+		64759D5C280057B7C2DF1ED5 /* AddColumnSheetController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddColumnSheetController.swift; sourceTree = "<group>"; };
+		675C8373DE67B390BDF3D56F /* FrequencyBarChartView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrequencyBarChartView.swift; sourceTree = "<group>"; };
+		78B4F3196FBFD18EE1CEFE04 /* FilterBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilterBarView.swift; sourceTree = "<group>"; };
+		7B0B36184783559FAD4B4095 /* DetailPaneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailPaneView.swift; sourceTree = "<group>"; };
+		7C72561B0D6B94EE6B2F0651 /* ProfilerQueryBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfilerQueryBuilder.swift; sourceTree = "<group>"; };
+		827FB26A316674D273763D8A /* AsyncInvalidationRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsyncInvalidationRegressionTests.swift; sourceTree = "<group>"; };
+		8386EE403F8E135B0B6E8392 /* RowCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RowCache.swift; sourceTree = "<group>"; };
+		855E318C43B795EAB8BC69CB /* Gridka-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Gridka-Bridging-Header.h"; sourceTree = "<group>"; };
+		8A9FFA4EA1DC35A80DA3BD2A /* DuckDBResultBoundsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuckDBResultBoundsTests.swift; sourceTree = "<group>"; };
+		8F5B2E9C45FF7BE9B2E9C7B7 /* FrequencyPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrequencyPanelController.swift; sourceTree = "<group>"; };
+		93B49704908BC7FD461AA270 /* DragDropView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DragDropView.swift; sourceTree = "<group>"; };
+		98A7AB533AFA6EF101BC7CA1 /* StatusBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarView.swift; sourceTree = "<group>"; };
+		A0E67261180C00B6D108F2A8 /* SettingsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsWindowController.swift; sourceTree = "<group>"; };
+		A13BAF1CD30635DBC5A3C6BB /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		B00F214CA34AF0DFD2013C74 /* DuckDBEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuckDBEngine.swift; sourceTree = "<group>"; };
+		B190E556873AFF3CA89009D9 /* 12data_forex.csv */ = {isa = PBXFileReference; path = 12data_forex.csv; sourceTree = "<group>"; };
+		B3E385F249B65D4E10830F9A /* ColumnFilter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColumnFilter.swift; sourceTree = "<group>"; };
+		B700DF94716B4E32883D9802 /* GridkaError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GridkaError.swift; sourceTree = "<group>"; };
+		BA3AC474FD4995B08A2BFF30 /* GridkaQuickLook.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = GridkaQuickLook.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		BA6E7A8C10E86F68CF034F69 /* AnalysisToolbarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalysisToolbarView.swift; sourceTree = "<group>"; };
+		BC73BA0F81338640148BCEA9 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		C22180CA047E37DAD0858907 /* DuckDBTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuckDBTypes.swift; sourceTree = "<group>"; };
+		CFF1C37E1D3CAE95EF1E42D0 /* QueryCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueryCoordinator.swift; sourceTree = "<group>"; };
+		D0D192C82236C2A61F39BF15 /* GridkaUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GridkaUITests.swift; sourceTree = "<group>"; };
+		DB01BCC199BE389372DD1EC7 /* HelpWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelpWindowController.swift; sourceTree = "<group>"; };
+		DBF535A46B11B725AB239D85 /* ColumnDescriptor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColumnDescriptor.swift; sourceTree = "<group>"; };
+		DE7B19D736DD67D16C4E7A1D /* FileSessionShutdownTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileSessionShutdownTests.swift; sourceTree = "<group>"; };
+		DFC3AA1AF674C208ECA378FD /* GridkaTestHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GridkaTestHelpers.swift; sourceTree = "<group>"; };
+		E206BCEACC03C5EA52458503 /* StaleReloadClampTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StaleReloadClampTests.swift; sourceTree = "<group>"; };
+		E4EECE9D1DFD8888D7C5E80B /* RowCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RowCacheTests.swift; sourceTree = "<group>"; };
+		E4F611C0100D0E475878D269 /* PreviewProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewProvider.swift; sourceTree = "<group>"; };
+		F0167333A7467F79F5487189 /* FileSessionCrashRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileSessionCrashRegressionTests.swift; sourceTree = "<group>"; };
+		F2DB69E39CDA2D745413C2D2 /* SummaryCounterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SummaryCounterTests.swift; sourceTree = "<group>"; };
+		F8728176BC67BC3E88503A1F /* SettingsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsManager.swift; sourceTree = "<group>"; };
+		F916F23483BAD9488B21BF49 /* headerless.csv */ = {isa = PBXFileReference; path = headerless.csv; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		01DF318D27453CAD6FEA9B91 /* Engine */ = {
+			isa = PBXGroup;
+			children = (
+				B00F214CA34AF0DFD2013C74 /* DuckDBEngine.swift */,
+				B700DF94716B4E32883D9802 /* GridkaError.swift */,
+				7C72561B0D6B94EE6B2F0651 /* ProfilerQueryBuilder.swift */,
+				CFF1C37E1D3CAE95EF1E42D0 /* QueryCoordinator.swift */,
+				8386EE403F8E135B0B6E8392 /* RowCache.swift */,
+			);
+			path = Engine;
+			sourceTree = "<group>";
+		};
+		0E58A68D4E7867E0CE109193 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				2C71D93679EE4326E40DE343 /* Gridka.app */,
+				BA3AC474FD4995B08A2BFF30 /* GridkaQuickLook.appex */,
+				36241D62915EDB2349369A0E /* GridkaTests.xctest */,
+				3EFEA56E058198CE00FF1896 /* GridkaUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		28313336A3AA5F5E2490BF03 /* QuickLookExtension */ = {
+			isa = PBXGroup;
+			children = (
+				E4F611C0100D0E475878D269 /* PreviewProvider.swift */,
+			);
+			path = QuickLookExtension;
+			sourceTree = "<group>";
+		};
+		6190E87A8EED0C57E8B37F98 /* Model */ = {
+			isa = PBXGroup;
+			children = (
+				DBF535A46B11B725AB239D85 /* ColumnDescriptor.swift */,
+				B3E385F249B65D4E10830F9A /* ColumnFilter.swift */,
+				3F0514B553D8369EA17C238D /* ColumnSummary.swift */,
+				36BE1292EC44C7C3C6B357F8 /* FileSession.swift */,
+				F8728176BC67BC3E88503A1F /* SettingsManager.swift */,
+				095EE326D464CF571C069CEA /* TabContext.swift */,
+				1948F2C9A6E24B144656D488 /* ViewState.swift */,
+			);
+			path = Model;
+			sourceTree = "<group>";
+		};
+		A6A1ACCE266C389F5BF8084E /* UITests */ = {
+			isa = PBXGroup;
+			children = (
+				D0D192C82236C2A61F39BF15 /* GridkaUITests.swift */,
+			);
+			path = UITests;
+			sourceTree = "<group>";
+		};
+		BA20E2CA488480CA900E5D10 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				E917A371F14F1F565D1A27A7 /* App */,
+				C079B43626CD7A8CBA89B6B8 /* Bridging */,
+				01DF318D27453CAD6FEA9B91 /* Engine */,
+				6190E87A8EED0C57E8B37F98 /* Model */,
+				C8180CB34981A0995D2989B4 /* UI */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		C079B43626CD7A8CBA89B6B8 /* Bridging */ = {
+			isa = PBXGroup;
+			children = (
+				C22180CA047E37DAD0858907 /* DuckDBTypes.swift */,
+				855E318C43B795EAB8BC69CB /* Gridka-Bridging-Header.h */,
+			);
+			path = Bridging;
+			sourceTree = "<group>";
+		};
+		C8180CB34981A0995D2989B4 /* UI */ = {
+			isa = PBXGroup;
+			children = (
+				64759D5C280057B7C2DF1ED5 /* AddColumnSheetController.swift */,
+				BA6E7A8C10E86F68CF034F69 /* AnalysisToolbarView.swift */,
+				148A6DDD81329D4341B12A95 /* ComputedColumnPanelController.swift */,
+				7B0B36184783559FAD4B4095 /* DetailPaneView.swift */,
+				93B49704908BC7FD461AA270 /* DragDropView.swift */,
+				78B4F3196FBFD18EE1CEFE04 /* FilterBarView.swift */,
+				02189A05DDD0014F6A738AB9 /* FilterPopoverViewController.swift */,
+				675C8373DE67B390BDF3D56F /* FrequencyBarChartView.swift */,
+				8F5B2E9C45FF7BE9B2E9C7B7 /* FrequencyPanelController.swift */,
+				2E855B5DD828CDC8148B73A2 /* GroupByPanelController.swift */,
+				DB01BCC199BE389372DD1EC7 /* HelpWindowController.swift */,
+				0C8A563F4BB78B24274859F8 /* HistogramView.swift */,
+				34F32E97C84532FE333CC550 /* ProfilerSidebarView.swift */,
+				1E553B133E5373521C491798 /* RenameColumnPopoverController.swift */,
+				10A445128E17068857A74D6D /* SavePanelAccessoryView.swift */,
+				18BD14A2379A4CF2905D7D7C /* SearchBarView.swift */,
+				A0E67261180C00B6D108F2A8 /* SettingsWindowController.swift */,
+				4C680BB6EC932745E979AE6A /* SparklineHeaderCell.swift */,
+				98A7AB533AFA6EF101BC7CA1 /* StatusBarView.swift */,
+				1168207DE5F39A9D60E99322 /* TableViewController.swift */,
+				428655CECCDD91C856F6EB10 /* TopValuesView.swift */,
+			);
+			path = UI;
+			sourceTree = "<group>";
+		};
+		D3BDB7CE3E03BF9B11BA89C3 = {
+			isa = PBXGroup;
+			children = (
+				28313336A3AA5F5E2490BF03 /* QuickLookExtension */,
+				FCE90D0FD3A34A094C784012 /* Resources */,
+				BA20E2CA488480CA900E5D10 /* Sources */,
+				F9CA3EF8E41793A5F639C511 /* Tests */,
+				A6A1ACCE266C389F5BF8084E /* UITests */,
+				0E58A68D4E7867E0CE109193 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		E917A371F14F1F565D1A27A7 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				A13BAF1CD30635DBC5A3C6BB /* AppDelegate.swift */,
+				5046EEEDA6E24A2F5833DD08 /* main.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		F9CA3EF8E41793A5F639C511 /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				B190E556873AFF3CA89009D9 /* 12data_forex.csv */,
+				827FB26A316674D273763D8A /* AsyncInvalidationRegressionTests.swift */,
+				1CECB8E24CB06B3026E6B2AD /* cb-companies.csv */,
+				4A08E49F2EDFE3A3A8F8F87D /* CrashRegressionSuiteTests.swift */,
+				8A9FFA4EA1DC35A80DA3BD2A /* DuckDBResultBoundsTests.swift */,
+				295CD84B9E7A7445423A459E /* ExpressionInjectionTests.swift */,
+				F0167333A7467F79F5487189 /* FileSessionCrashRegressionTests.swift */,
+				DE7B19D736DD67D16C4E7A1D /* FileSessionShutdownTests.swift */,
+				DFC3AA1AF674C208ECA378FD /* GridkaTestHelpers.swift */,
+				15FCA2638045DB76E9039F92 /* GridkaTests.swift */,
+				F916F23483BAD9488B21BF49 /* headerless.csv */,
+				126D09110628E6BFA4E1585B /* large.csv */,
+				03F6EA6E4B2F86186B51B0CE /* QueryCoordinatorTests.swift */,
+				E4EECE9D1DFD8888D7C5E80B /* RowCacheTests.swift */,
+				E206BCEACC03C5EA52458503 /* StaleReloadClampTests.swift */,
+				F2DB69E39CDA2D745413C2D2 /* SummaryCounterTests.swift */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+		FCE90D0FD3A34A094C784012 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				4AC4CD1281A86010B2E91076 /* Assets.xcassets */,
+				BC73BA0F81338640148BCEA9 /* PrivacyInfo.xcprivacy */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		35400ED8FEE623CE47958B2C /* GridkaTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 981B5A267659BE887534C2DE /* Build configuration list for PBXNativeTarget "GridkaTests" */;
+			buildPhases = (
+				340EF55BBCDF561080DBD2FA /* Sources */,
+				B99A44DC9C0EA065E6EB3B7A /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A05563BC25CDD7F24BA1F170 /* PBXTargetDependency */,
+			);
+			name = GridkaTests;
+			packageProductDependencies = (
+			);
+			productName = GridkaTests;
+			productReference = 36241D62915EDB2349369A0E /* GridkaTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		AC6BF206D8D03D6B01C166AC /* Gridka */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 8A856BDB9231A67D462943B4 /* Build configuration list for PBXNativeTarget "Gridka" */;
+			buildPhases = (
+				6A9A84A05A47F5E89B794200 /* Sources */,
+				487D5CDB329CFD0330340879 /* Copy and Sign DuckDB dylib */,
+				3FE1087B1A7546542B9BC97D /* Resources */,
+				5477F534DAA697A85AC73598 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				634467F7CA381DC72ECE32A3 /* PBXTargetDependency */,
+			);
+			name = Gridka;
+			packageProductDependencies = (
+			);
+			productName = Gridka;
+			productReference = 2C71D93679EE4326E40DE343 /* Gridka.app */;
+			productType = "com.apple.product-type.application";
+		};
+		ACC9506DE91719B9236CE783 /* GridkaUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = DD49890F394292784032ADB2 /* Build configuration list for PBXNativeTarget "GridkaUITests" */;
+			buildPhases = (
+				9C3D8DC922C9FB9E710B3AEC /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				6FBEF210E1513C7979E9F623 /* PBXTargetDependency */,
+			);
+			name = GridkaUITests;
+			packageProductDependencies = (
+			);
+			productName = GridkaUITests;
+			productReference = 3EFEA56E058198CE00FF1896 /* GridkaUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		B1881C0F227F19FE57584926 /* GridkaQuickLook */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F8DAEDBDCBE0B3FF5CD99F92 /* Build configuration list for PBXNativeTarget "GridkaQuickLook" */;
+			buildPhases = (
+				9433995D5A4033242F626BB5 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = GridkaQuickLook;
+			packageProductDependencies = (
+			);
+			productName = GridkaQuickLook;
+			productReference = BA3AC474FD4995B08A2BFF30 /* GridkaQuickLook.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		C0D920F11430CE6461EBA57E /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					35400ED8FEE623CE47958B2C = {
+						DevelopmentTeam = Q34D9AYJ95;
+						ProvisioningStyle = Automatic;
+					};
+					AC6BF206D8D03D6B01C166AC = {
+						DevelopmentTeam = Q34D9AYJ95;
+						ProvisioningStyle = Automatic;
+					};
+					ACC9506DE91719B9236CE783 = {
+						DevelopmentTeam = Q34D9AYJ95;
+						ProvisioningStyle = Automatic;
+						TestTargetID = AC6BF206D8D03D6B01C166AC;
+					};
+					B1881C0F227F19FE57584926 = {
+						DevelopmentTeam = Q34D9AYJ95;
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = D7183C181D46FC15DF6B328E /* Build configuration list for PBXProject "Gridka" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = D3BDB7CE3E03BF9B11BA89C3;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				AC6BF206D8D03D6B01C166AC /* Gridka */,
+				B1881C0F227F19FE57584926 /* GridkaQuickLook */,
+				35400ED8FEE623CE47958B2C /* GridkaTests */,
+				ACC9506DE91719B9236CE783 /* GridkaUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		3FE1087B1A7546542B9BC97D /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				154B9E1CC7B3109F735DF9D6 /* Assets.xcassets in Resources */,
+				AD760EA59244EAEE9DBF1912 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B99A44DC9C0EA065E6EB3B7A /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9126A97436F20DDF826CFA7F /* 12data_forex.csv in Resources */,
+				EE9F9BDE9EAEDE34A4C1F516 /* cb-companies.csv in Resources */,
+				FA56FC3548B9B272B03721ED /* headerless.csv in Resources */,
+				E87075694F60C341E5122D47 /* large.csv in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		487D5CDB329CFD0330340879 /* Copy and Sign DuckDB dylib */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(PROJECT_DIR)/Libraries/libduckdb.dylib",
+			);
+			name = "Copy and Sign DuckDB dylib";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(BUILT_PRODUCTS_DIR)/Gridka.app/Contents/Frameworks/libduckdb.dylib",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "mkdir -p \"${BUILT_PRODUCTS_DIR}/Gridka.app/Contents/Frameworks\"\ncp -f \"${PROJECT_DIR}/Libraries/libduckdb.dylib\" \"${BUILT_PRODUCTS_DIR}/Gridka.app/Contents/Frameworks/libduckdb.dylib\"\ncodesign --force --sign \"${CODE_SIGN_IDENTITY:--}\" --options runtime \"${BUILT_PRODUCTS_DIR}/Gridka.app/Contents/Frameworks/libduckdb.dylib\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		340EF55BBCDF561080DBD2FA /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				20E21C5829857898A553B5E8 /* AsyncInvalidationRegressionTests.swift in Sources */,
+				F118F0A9549D0DC798124D20 /* CrashRegressionSuiteTests.swift in Sources */,
+				86E80D6DDFFC6D2ED897F268 /* DuckDBResultBoundsTests.swift in Sources */,
+				D41544D8692C6AD39F339803 /* ExpressionInjectionTests.swift in Sources */,
+				08FA83CC46F43CB4F1DFB9E7 /* FileSessionCrashRegressionTests.swift in Sources */,
+				9528BD460FDC26C5F926A4A4 /* FileSessionShutdownTests.swift in Sources */,
+				0BA303F61CDE98113F15FAE8 /* GridkaTestHelpers.swift in Sources */,
+				8D2333827090BDCE78058109 /* GridkaTests.swift in Sources */,
+				44E010CD2BD6D258B7F1D93A /* QueryCoordinatorTests.swift in Sources */,
+				D19D8BF3091F9653AD70D4E2 /* RowCacheTests.swift in Sources */,
+				FD8A62505EB24CA9F19F45E9 /* StaleReloadClampTests.swift in Sources */,
+				CCEF99BF940F7DE4EB5EF98C /* SummaryCounterTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		6A9A84A05A47F5E89B794200 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CA419263BC8753648BF8C3DA /* AddColumnSheetController.swift in Sources */,
+				9525EB05B0ABB5784FA870D6 /* AnalysisToolbarView.swift in Sources */,
+				60039A675F99F1A89C44D952 /* AppDelegate.swift in Sources */,
+				09196D1921A3B731714C2BF0 /* ColumnDescriptor.swift in Sources */,
+				FF7FB670A9C0E73E6B8C4004 /* ColumnFilter.swift in Sources */,
+				88717FF3150E57A0F42F2712 /* ColumnSummary.swift in Sources */,
+				80A7FD7B1EB4B3F189E41278 /* ComputedColumnPanelController.swift in Sources */,
+				103C31890F60E4112AF71FD6 /* DetailPaneView.swift in Sources */,
+				9AFB93C489DFDD314F0200BD /* DragDropView.swift in Sources */,
+				025D161AFAD18C70038E602A /* DuckDBEngine.swift in Sources */,
+				B3AE51D9F5131DB47B5DDDE1 /* DuckDBTypes.swift in Sources */,
+				6DFB513A6371B55335829428 /* FileSession.swift in Sources */,
+				6231DE89BF13F756478E2113 /* FilterBarView.swift in Sources */,
+				C90F7FC720259919E3F5D3F8 /* FilterPopoverViewController.swift in Sources */,
+				97BB0332452B5D025E29265D /* FrequencyBarChartView.swift in Sources */,
+				AF4E4BFFF3691EA2AF67AFE9 /* FrequencyPanelController.swift in Sources */,
+				17F7AD8BD0ABAD27C9FE5806 /* GridkaError.swift in Sources */,
+				63285D263445081D0918D2F8 /* GroupByPanelController.swift in Sources */,
+				C335C4285ED0BAF57F46E4B8 /* HelpWindowController.swift in Sources */,
+				E62C405830BD0D1F5EC96525 /* HistogramView.swift in Sources */,
+				D0C41CC8DC6C829F43B6751A /* ProfilerQueryBuilder.swift in Sources */,
+				A961FD9E79B3EED6E832746A /* ProfilerSidebarView.swift in Sources */,
+				F162F68841E98943DAE34E7F /* QueryCoordinator.swift in Sources */,
+				611DF393CA57236B7A4BBBB5 /* RenameColumnPopoverController.swift in Sources */,
+				C54CC3942888E9611DA63299 /* RowCache.swift in Sources */,
+				9C514476BF893E547831A4DC /* SavePanelAccessoryView.swift in Sources */,
+				717D8CE6633935DAB0DAF4A3 /* SearchBarView.swift in Sources */,
+				EE85A12F8509B1B53AC73E1D /* SettingsManager.swift in Sources */,
+				D1934CC50D6912A6357040E3 /* SettingsWindowController.swift in Sources */,
+				CAC9EF562702D91F3B66E4DC /* SparklineHeaderCell.swift in Sources */,
+				E5577C229385C5F5D2D2EA12 /* StatusBarView.swift in Sources */,
+				FF35DBFAD0F2839243FC2CAA /* TabContext.swift in Sources */,
+				03098BFA16BA2C0C66D633D9 /* TableViewController.swift in Sources */,
+				CE345F3ACB130037891E147C /* TopValuesView.swift in Sources */,
+				A100AD54FC9B8C96ACEAC96F /* ViewState.swift in Sources */,
+				FD849E45C2DC289455F834E5 /* main.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9433995D5A4033242F626BB5 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1C2E9724C5CF7EE34831387A /* PreviewProvider.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9C3D8DC922C9FB9E710B3AEC /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1911E12FAFDCB2E7B83116FA /* GridkaUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		634467F7CA381DC72ECE32A3 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B1881C0F227F19FE57584926 /* GridkaQuickLook */;
+			targetProxy = D3B11A219535A021374BEC74 /* PBXContainerItemProxy */;
+		};
+		6FBEF210E1513C7979E9F623 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = AC6BF206D8D03D6B01C166AC /* Gridka */;
+			targetProxy = 7965E50D34E8515D930B20D7 /* PBXContainerItemProxy */;
+		};
+		A05563BC25CDD7F24BA1F170 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = AC6BF206D8D03D6B01C166AC /* Gridka */;
+			targetProxy = 71201DA7B399B6DC858388AF /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		1739403C01580E7A700FF86E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(PROJECT_DIR)/Libraries",
+				);
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = org.ceesaxp.gridka.app.tests;
+				SDKROOT = macosx;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Gridka.app/Contents/MacOS/Gridka";
+			};
+			name = Release;
+		};
+		198D16E37BA916E3F603805C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Gridka.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				HEADER_SEARCH_PATHS = (
+					"$(PROJECT_DIR)/Libraries",
+				);
+				INFOPLIST_FILE = Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"@executable_path/../Frameworks",
+					"$(PROJECT_DIR)/Libraries",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(PROJECT_DIR)/Libraries",
+				);
+				MARKETING_VERSION = 1.0.0;
+				OTHER_LDFLAGS = (
+					"-lduckdb",
+					"-lc++",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = org.ceesaxp.gridka.app;
+				SDKROOT = macosx;
+				SWIFT_OBJC_BRIDGING_HEADER = "Sources/Bridging/Gridka-Bridging-Header.h";
+			};
+			name = Release;
+		};
+		2A8E5553260C30FBE93EF873 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(PROJECT_DIR)/Libraries",
+				);
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = org.ceesaxp.gridka.app.tests;
+				SDKROOT = macosx;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Gridka.app/Contents/MacOS/Gridka";
+			};
+			name = Debug;
+		};
+		36E82EC7F3DC678B677A72CB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = org.ceesaxp.gridka.app.uitests;
+				SDKROOT = macosx;
+				TEST_TARGET_NAME = Gridka;
+			};
+			name = Debug;
+		};
+		615838E3D48BED3CEA016AF4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = Q34D9AYJ95;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.10;
+			};
+			name = Release;
+		};
+		7F41F333A3F67AEFAF9CCCA2 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Gridka.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				HEADER_SEARCH_PATHS = (
+					"$(PROJECT_DIR)/Libraries",
+				);
+				INFOPLIST_FILE = Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"@executable_path/../Frameworks",
+					"$(PROJECT_DIR)/Libraries",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(PROJECT_DIR)/Libraries",
+				);
+				MARKETING_VERSION = 1.0.0;
+				OTHER_LDFLAGS = (
+					"-lduckdb",
+					"-lc++",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = org.ceesaxp.gridka.app;
+				SDKROOT = macosx;
+				SWIFT_OBJC_BRIDGING_HEADER = "Sources/Bridging/Gridka-Bridging-Header.h";
+			};
+			name = Debug;
+		};
+		A0ACBEFEA9E30384012F497D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = GridkaQuickLook.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = QuickLookExtension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = org.ceesaxp.gridka.app.quicklook;
+				PRODUCT_NAME = GridkaQuickLook;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+			};
+			name = Release;
+		};
+		E26127ADA8FC056D77F24842 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = org.ceesaxp.gridka.app.uitests;
+				SDKROOT = macosx;
+				TEST_TARGET_NAME = Gridka;
+			};
+			name = Release;
+		};
+		E261E82172DB5BFF3CF10D95 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = Q34D9AYJ95;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.10;
+			};
+			name = Debug;
+		};
+		F2FC753350AD983DC4B74575 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = GridkaQuickLook.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = QuickLookExtension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = org.ceesaxp.gridka.app.quicklook;
+				PRODUCT_NAME = GridkaQuickLook;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		8A856BDB9231A67D462943B4 /* Build configuration list for PBXNativeTarget "Gridka" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7F41F333A3F67AEFAF9CCCA2 /* Debug */,
+				198D16E37BA916E3F603805C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		981B5A267659BE887534C2DE /* Build configuration list for PBXNativeTarget "GridkaTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2A8E5553260C30FBE93EF873 /* Debug */,
+				1739403C01580E7A700FF86E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		D7183C181D46FC15DF6B328E /* Build configuration list for PBXProject "Gridka" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E261E82172DB5BFF3CF10D95 /* Debug */,
+				615838E3D48BED3CEA016AF4 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		DD49890F394292784032ADB2 /* Build configuration list for PBXNativeTarget "GridkaUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				36E82EC7F3DC678B677A72CB /* Debug */,
+				E26127ADA8FC056D77F24842 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		F8DAEDBDCBE0B3FF5CD99F92 /* Build configuration list for PBXNativeTarget "GridkaQuickLook" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F2FC753350AD983DC4B74575 /* Debug */,
+				A0ACBEFEA9E30384012F497D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = C0D920F11430CE6461EBA57E /* Project object */;
+}

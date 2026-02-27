@@ -20,6 +20,7 @@ final class DuckDBResult {
     }
 
     func columnName(at index: Int) -> String {
+        guard index >= 0, index < columnCount else { return "" }
         guard let cString = duckdb_column_name(&result, idx_t(index)) else {
             return ""
         }
@@ -27,11 +28,13 @@ final class DuckDBResult {
     }
 
     func columnType(at index: Int) -> DuckDBColumnType {
+        guard index >= 0, index < columnCount else { return .unknown }
         let rawType = duckdb_column_type(&result, idx_t(index))
         return DuckDBColumnType.mapType(from: rawType)
     }
 
     func value(row: Int, col: Int) -> DuckDBValue {
+        guard row >= 0, row < rowCount, col >= 0, col < columnCount else { return .null }
         let r = idx_t(row)
         let c = idx_t(col)
 
@@ -96,13 +99,23 @@ final class DuckDBEngine {
             throw GridkaError.databaseInitFailed
         }
 
-        let connectState = duckdb_connect(database!, &connection)
+        guard let db = database else {
+            throw GridkaError.databaseInitFailed
+        }
+
+        let connectState = duckdb_connect(db, &connection)
         guard connectState == DuckDBSuccess else {
             duckdb_close(&database)
             throw GridkaError.connectionFailed
         }
 
-        try configureDatabaseSettings()
+        do {
+            try configureDatabaseSettings()
+        } catch {
+            duckdb_disconnect(&connection)
+            duckdb_close(&database)
+            throw error
+        }
     }
 
     deinit {
@@ -116,6 +129,10 @@ final class DuckDBEngine {
 
     @discardableResult
     func execute(_ sql: String) throws -> DuckDBResult {
+        guard let conn = connection else {
+            throw GridkaError.queryFailed("No active database connection")
+        }
+
         if logSQL {
             logger.info("SQL: \(sql, privacy: .public)")
         }
@@ -123,7 +140,7 @@ final class DuckDBEngine {
         let startTime = logSQL ? CFAbsoluteTimeGetCurrent() : 0
 
         var result = duckdb_result()
-        let state = duckdb_query(connection!, sql, &result)
+        let state = duckdb_query(conn, sql, &result)
 
         if state == DuckDBError {
             if logSQL {
@@ -165,7 +182,9 @@ final class DuckDBEngine {
         let memoryLimitStr = String(format: "%.1fGB", memoryLimitGB)
         try execute("SET memory_limit = '\(memoryLimitStr)'")
 
-        let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+        guard let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+            throw GridkaError.loadFailed("Unable to locate system cache directory")
+        }
         let tempDir = cacheDir.appendingPathComponent("com.gridka.app/duckdb-temp")
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
         try execute("SET temp_directory = '\(tempDir.path)'")

@@ -1,0 +1,175 @@
+{
+  "project": "Gridka",
+  "branchName": "ralph/crash-security-stability-overview",
+  "description": "Close remaining crash and security gaps identified by code review and 2026-02-26 crash signatures: computed-expression injection hardening, Sparkline/FileSession teardown safety, queue deadlock removal, and query-path stability.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Enforce computed expression safety on runtime add/apply path",
+      "description": "As a user, I want computed-column expressions validated consistently so legitimate literals like ';' work, while multi-statement or injected SQL is rejected before execution.",
+      "acceptanceCriteria": [
+        "Use a single shared validator for computed expressions in both preview and runtime add/apply paths",
+        "Validation rejects semicolons only when outside string/comment context",
+        "Expressions containing ';' inside string literals remain valid",
+        "Runtime add/apply path refuses invalid expressions with a non-fatal user-visible error",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Targets review P0: runtime expression interpolation path was not using the same safety guard as preview."
+    },
+    {
+      "id": "US-002",
+      "title": "Add computed-expression injection regression tests",
+      "description": "As a developer, I want automated coverage for expression validation so injection protections and literal-semicolon support do not regress.",
+      "acceptanceCriteria": [
+        "Add tests for semicolon in string literals (accepted)",
+        "Add tests for semicolon in SQL comments (accepted behavior per parser design)",
+        "Add tests for semicolon outside literals/comments (rejected)",
+        "Add tests that runtime computed-column add path applies the same validation as preview",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Locks in the user requirement that SQL like field = ';' is allowed while blocking multi-statement payloads."
+    },
+    {
+      "id": "US-003",
+      "title": "Harden Sparkline header teardown during tab/window close",
+      "description": "As a user, I want tab closure to safely release header cells so SparklineHeaderCell deallocation cannot crash the app.",
+      "acceptanceCriteria": [
+        "Table teardown clears sparkline summary data for all header cells before releasing table/session references",
+        "TearDown sequence is explicit and idempotent when window close occurs during queued UI updates",
+        "Window close path performs deterministic header/table cleanup before TabContext release",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "Crash signatures: Gridka-2026-02-26-185413, 203048, 203500, 210902 in SparklineHeaderCell.__ivar_destroyer."
+    },
+    {
+      "id": "US-004",
+      "title": "Guard FileSession shutdown and deallocation race windows",
+      "description": "As a user, I want in-flight callbacks during tab closure to be safely ignored so deallocation of summary/cell state cannot crash.",
+      "acceptanceCriteria": [
+        "FileSession exposes shutdown/invalidation state set during tab close",
+        "Async query completions check shutdown state before mutating main-thread session/UI state",
+        "Completions still execute for bookkeeping release where required",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "Crash correlation includes FileSession.deinit stack (Gridka-2026-02-26-210821)."
+    },
+    {
+      "id": "US-005",
+      "title": "Eliminate main-thread sync wait from summary computation",
+      "description": "As a developer, I want summary generation checks to avoid lock inversion so queryQueue work cannot deadlock against main thread.",
+      "acceptanceCriteria": [
+        "Remove DispatchQueue.main.sync usage from computeColumnSummaries path",
+        "Generation checks use a non-blocking thread-safe approach (atomic/lock snapshot or equivalent)",
+        "Stale summary results are still discarded correctly",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "Implements recommendation from review item #3 (replace main.sync deadlock pattern)."
+    },
+    {
+      "id": "US-006",
+      "title": "Clamp table reload ranges for stale/changed page results",
+      "description": "As a user, I want rapid sort/filter/search changes to remain stable so stale page callbacks never trigger invalid table reload ranges.",
+      "acceptanceCriteria": [
+        "requestPageFetch completion clamps reload row indexes to current table row bounds",
+        "Empty or out-of-bounds ranges are ignored safely",
+        "Stale generation fetch completions do not attempt unsafe row reloads",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "Targets stability risk where stale page data can produce invalid reload index sets."
+    },
+    {
+      "id": "US-007",
+      "title": "Enforce queue ownership by snapshotting main-owned config",
+      "description": "As a developer, I want queryQueue closures to use immutable snapshots so FileSession main-thread-owned state cannot race with background work.",
+      "acceptanceCriteria": [
+        "Capture hasHeaders/customDelimiter/related load parameters on main thread before dispatching queryQueue work",
+        "Remove queryQueue reads of mutable main-owned settings where contract forbids it",
+        "Add lightweight assertions/documentation for ownership boundaries",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": "Targets review data-race findings around csvReadParams and save/reload paths."
+    },
+    {
+      "id": "US-008",
+      "title": "Harden DuckDB engine lifecycle and unwrap safety",
+      "description": "As a user, I want database engine failures to degrade safely so lifecycle edge cases do not crash the process.",
+      "acceptanceCriteria": [
+        "Replace force unwraps on connection/database/cache directory paths with guarded error handling",
+        "DuckDBEngine init cleans up native handles on partial initialization failure",
+        "execute path handles missing/invalid connection state without trapping",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": "Includes remaining first!/connection! crash points in DuckDBEngine and FileSession."
+    },
+    {
+      "id": "US-009",
+      "title": "Add bounds-safe DuckDBResult accessors",
+      "description": "As a developer, I want result accessors to validate indices so invalid row/column access cannot crash via C-API conversions.",
+      "acceptanceCriteria": [
+        "DuckDBResult guards row/column/index bounds before C calls",
+        "Negative/out-of-range indices return safe null/empty fallback or explicit error path",
+        "No unchecked Int to idx_t conversion for externally-derived indices",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": "Targets C-interop safety findings in result accessor methods."
+    },
+    {
+      "id": "US-010",
+      "title": "Synchronize summary session temp table naming",
+      "description": "As a developer, I want summary temp table names generated safely under concurrency so session creation never collides.",
+      "acceptanceCriteria": [
+        "Protect summaryCounter mutation with synchronization or replace with collision-safe naming",
+        "createSummarySession is safe under concurrent invocations",
+        "No duplicate temp table name collisions in stress test",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": "Targets static shared counter race in FileSession summary factory."
+    },
+    {
+      "id": "US-011",
+      "title": "Add crash-focused regression suite for teardown and concurrency",
+      "description": "As a developer, I want deterministic tests for close+scroll+summary scenarios so these crash classes remain fixed.",
+      "acceptanceCriteria": [
+        "Add regression test covering repeated tab close while sparkline headers are populated",
+        "Add regression test for summary computation invalidation without deadlock",
+        "Add regression test for stale fetch completion reload clamping",
+        "Add regression test for concurrent summary session creation name uniqueness",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": "Completes coverage gap between known crash signatures and current automated tests."
+    }
+  ]
+}

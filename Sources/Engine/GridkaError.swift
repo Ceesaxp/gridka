@@ -7,6 +7,9 @@ enum GridkaError: LocalizedError {
     case fileNotFound(String)
     case loadFailed(String)
     case invalidExpression(String)
+    /// The FileSession was shut down (tab/window closed) while an async operation
+    /// was in flight. This is a normal cancellation, not a user-visible error. (US-004)
+    case sessionShutDown
 
     var errorDescription: String? {
         switch self {
@@ -22,6 +25,8 @@ enum GridkaError: LocalizedError {
             return "Failed to load file: \(message)"
         case .invalidExpression(let message):
             return message
+        case .sessionShutDown:
+            return "Session was closed"
         }
     }
 }

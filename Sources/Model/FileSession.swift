@@ -15,17 +15,30 @@ final class FileSession {
     // FileSession uses two execution contexts:
     //
     //   • **Main thread** — owns ALL mutable state: viewState, rowCache,
-    //     columns, totalRows, isFullyLoaded, generation counters,
+    //     columns, totalRows, isFullyLoaded, most generation counters,
     //     columnSummaries, editedCells, isModified, and configuration
     //     properties (hasHeaders, customDelimiter, overrideEncoding, etc.).
     //     Every public method that reads or writes these properties MUST be
     //     called on the main thread.
+    //
+    //   • **Exception:** `summaryGeneration` is protected by an
+    //     os_unfair_lock so queryQueue can check it without blocking main.
+    //     Writes still happen on main; the lock provides cross-thread visibility.
     //
     //   • **queryQueue** (serial) — owns DuckDB engine access. All SQL
     //     execution happens here. Closures dispatched to queryQueue must
     //     NOT read or write main-thread state; they capture snapshots of
     //     the values they need *before* the async dispatch and return
     //     results back to main via DispatchQueue.main.async.
+    //
+    //     **Snapshotting rule (US-007):** Configuration properties like
+    //     `hasHeaders`, `customDelimiter`, `overrideEncoding`, `filePath`,
+    //     `columns`, and `viewState` must be captured into local `let`
+    //     constants on the main thread before the `queryQueue.async`
+    //     dispatch. Helper functions that read these properties (e.g.
+    //     `csvReadParams()`) must likewise be called on the main thread
+    //     and their results captured. This prevents data races when the
+    //     user changes settings while a background query is in flight.
     //
     // Key public methods assert `dispatchPrecondition(condition: .onQueue(.main))`
     // to catch violations at runtime during development.
@@ -50,8 +63,24 @@ final class FileSession {
 
     /// Generation counter for column summary computation. Incremented when summaries are
     /// invalidated (data mutations, reload). Prevents stale summary results from being stored.
-    /// Main-thread only.
-    private var summaryGeneration: Int = 0
+    /// Protected by `_summaryGenLock` so queryQueue can read it without blocking main.
+    private var _summaryGeneration: Int = 0
+    private var _summaryGenLock = os_unfair_lock()
+
+    /// Thread-safe read of the summary generation counter.
+    private var summaryGeneration: Int {
+        get {
+            os_unfair_lock_lock(&_summaryGenLock)
+            let val = _summaryGeneration
+            os_unfair_lock_unlock(&_summaryGenLock)
+            return val
+        }
+        set {
+            os_unfair_lock_lock(&_summaryGenLock)
+            _summaryGeneration = newValue
+            os_unfair_lock_unlock(&_summaryGenLock)
+        }
+    }
 
     /// Cached column summaries keyed by column name. Computed once after full file load.
     /// Invalidated when underlying data changes (cell edit, row delete, column add/delete, reload).
@@ -60,6 +89,12 @@ final class FileSession {
 
     /// Callback invoked on the main thread when column summaries finish computing.
     var onSummariesComputed: (() -> Void)?
+
+    /// Set to `true` during tab close. Async query completions that land on
+    /// the main thread after shutdown check this flag and skip state mutations,
+    /// while still firing completion handlers for caller bookkeeping. (US-004)
+    /// Main-thread only.
+    private(set) var isShutDown = false
 
     private(set) var tableName: String = "data"
     private(set) var columns: [ColumnDescriptor] = []
@@ -124,7 +159,20 @@ final class FileSession {
     var isSummarySession: Bool { summaryTableName != nil }
 
     /// Counter for unique summary table names across the app lifetime.
-    private static var summaryCounter = 0
+    /// Protected by `_summaryCounterLock` for thread-safe concurrent access (US-010).
+    private static var _summaryCounter = 0
+    private static var _summaryCounterLock = os_unfair_lock()
+
+    /// Thread-safe increment-and-return for summary counter.
+    /// Returns a unique counter value safe for use as a temp table suffix.
+    /// Internal (not private) so @testable import can exercise concurrent access (US-010).
+    static func nextSummaryCounter() -> Int {
+        os_unfair_lock_lock(&_summaryCounterLock)
+        _summaryCounter += 1
+        let val = _summaryCounter
+        os_unfair_lock_unlock(&_summaryCounterLock)
+        return val
+    }
 
     // MARK: - Init
 
@@ -174,8 +222,7 @@ final class FileSession {
         definition: GroupByDefinition,
         completion: @escaping (Result<FileSession, Error>) -> Void
     ) {
-        summaryCounter += 1
-        let tempName = "summary_\(summaryCounter)"
+        let tempName = "summary_\(nextSummaryCounter())"
 
         let source = sourceSession.queryCoordinator.buildSourceExpression(for: sourceSession.viewState)
         let whereClause = sourceSession.queryCoordinator.buildWhereSQL(for: sourceSession.viewState, columns: sourceSession.columns)
@@ -253,6 +300,25 @@ final class FileSession {
         }
     }
 
+    // MARK: - Shutdown (US-004)
+
+    /// Marks this session as shut down. After this call, async query completions
+    /// that land on the main thread will skip state mutations but still fire
+    /// completion handlers so callers can perform bookkeeping (e.g., clearing
+    /// `fetchingPages` in TableViewController).
+    ///
+    /// Must be called on the main thread, typically from `windowWillClose(_:)`
+    /// before tearing down the TableViewController.
+    func shutdown() {
+        dispatchPrecondition(condition: .onQueue(.main))
+        isShutDown = true
+        // Bump all generation counters so in-flight queries are also marked stale
+        // by the existing generation-check logic.
+        viewStateGeneration += 1
+        profilerGeneration += 1
+        summaryGeneration += 1
+    }
+
     // MARK: - Memory Management
 
     /// Updates the DuckDB memory limit for this session's engine.
@@ -282,12 +348,14 @@ final class FileSession {
                     // Extract delimiter (column 0)
                     if case .string(let delim) = result.value(row: 0, col: 0) {
                         DispatchQueue.main.async {
+                            guard !self.isShutDown else { return }
                             self.detectedDelimiter = delim
                         }
                     }
                     // Extract HasHeader (column 4)
                     if case .boolean(let hasHeader) = result.value(row: 0, col: 4) {
                         DispatchQueue.main.async {
+                            guard !self.isShutDown else { return }
                             self.detectedHasHeader = hasHeader
                             self.hasHeaders = hasHeader
                         }
@@ -321,6 +389,7 @@ final class FileSession {
     }
 
     /// Builds the read_csv_auto parameter string with current header/delimiter settings.
+    /// Must be called on the main thread; capture the result before dispatching to queryQueue.
     private func csvReadParams() -> String {
         var params = "ignore_errors = true, header = \(hasHeaders ? "true" : "false")"
         if let delim = customDelimiter {
@@ -345,6 +414,10 @@ final class FileSession {
                 let page = self.extractPage(from: result, startRow: 0, columns: cols)
 
                 DispatchQueue.main.async {
+                    guard !self.isShutDown else {
+                        completion(.failure(GridkaError.sessionShutDown))
+                        return
+                    }
                     self.columns = cols
                     self.viewState.totalFilteredRows = result.rowCount
                     self.rowCache.insertPage(page)
@@ -398,6 +471,10 @@ final class FileSession {
                 let cols = self.extractColumns(from: colResult)
 
                 DispatchQueue.main.async {
+                    guard !self.isShutDown else {
+                        completion(.failure(GridkaError.sessionShutDown))
+                        return
+                    }
                     self.columns = cols
                     self.isFullyLoaded = true
                     self.totalRows = totalRows
@@ -435,12 +512,10 @@ final class FileSession {
                 )
 
                 DispatchQueue.main.async {
-                    // Skip cache insert for stale results: if viewState changed
-                    // since this fetch was dispatched, the cache was already
-                    // invalidated and these rows are from an obsolete state.
+                    // Skip cache insert for stale or shut-down results.
                     // Always call completion so callers can clear bookkeeping
-                    // state (e.g. fetchingPages in TableViewController).
-                    if generation == self.viewStateGeneration {
+                    // state (e.g. fetchingPages in TableViewController). (US-004)
+                    if !self.isShutDown && generation == self.viewStateGeneration {
                         self.rowCache.insertPage(page)
                     }
                     completion(.success(page))
@@ -479,6 +554,10 @@ final class FileSession {
             return
         }
 
+        // Snapshot main-thread-owned state before dispatching to queryQueue (US-007).
+        let capturedFilePath = filePath
+        let capturedReadParams = csvReadParams()
+
         // For non-UTF-8 encodings: read file, transcode to UTF-8, write temp file, load temp file
         queryQueue.async { [weak self] in
             guard let self = self else { return }
@@ -486,7 +565,7 @@ final class FileSession {
             DispatchQueue.main.async { progress(0.0) }
 
             do {
-                let fileData = try Data(contentsOf: self.filePath)
+                let fileData = try Data(contentsOf: capturedFilePath)
 
                 DispatchQueue.main.async { progress(0.2) }
 
@@ -508,8 +587,13 @@ final class FileSession {
                 }
 
                 // Write to temp file in caches directory
-                let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-                    .appendingPathComponent("com.gridka.app")
+                guard let baseCacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+                    DispatchQueue.main.async {
+                        completion(.failure(GridkaError.loadFailed("Unable to locate system cache directory")))
+                    }
+                    return
+                }
+                let cacheDir = baseCacheDir.appendingPathComponent("com.gridka.app")
                 try FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
                 let tempFile = cacheDir.appendingPathComponent("transcode-\(UUID().uuidString).csv")
                 try utf8Data.write(to: tempFile)
@@ -519,7 +603,7 @@ final class FileSession {
                 // Now reload using the temp file
                 let tempPath = tempFile.path.replacingOccurrences(of: "'", with: "''")
                 let dropSQL = "DROP TABLE IF EXISTS data"
-                let createSQL = "CREATE TABLE data AS SELECT row_number() OVER () AS _gridka_rowid, * FROM read_csv_auto('\(tempPath)', \(self.csvReadParams()))"
+                let createSQL = "CREATE TABLE data AS SELECT row_number() OVER () AS _gridka_rowid, * FROM read_csv_auto('\(tempPath)', \(capturedReadParams))"
                 let countSQL = "SELECT COUNT(*) FROM data"
 
                 try self.engine.execute(dropSQL)
@@ -543,6 +627,10 @@ final class FileSession {
                 try? FileManager.default.removeItem(at: tempFile)
 
                 DispatchQueue.main.async {
+                    guard !self.isShutDown else {
+                        completion(.failure(GridkaError.sessionShutDown))
+                        return
+                    }
                     self.columns = cols
                     self.isFullyLoaded = true
                     self.totalRows = totalRows
@@ -597,6 +685,10 @@ final class FileSession {
                 let cols = self.extractColumns(from: colResult)
 
                 DispatchQueue.main.async {
+                    guard !self.isShutDown else {
+                        completion(.failure(GridkaError.sessionShutDown))
+                        return
+                    }
                     self.columns = cols
                     self.isFullyLoaded = true
                     self.totalRows = totalRows
@@ -646,7 +738,9 @@ final class FileSession {
                 }
                 try self.engine.execute(sql)
                 DispatchQueue.main.async {
-                    self.isModified = false
+                    if !self.isShutDown {
+                        self.isModified = false
+                    }
                     completion(.success(()))
                 }
             } catch {
@@ -684,8 +778,10 @@ final class FileSession {
                     }
                     try self.engine.execute(sql)
                     DispatchQueue.main.async {
-                        self.filePath = url
-                        self.isModified = false
+                        if !self.isShutDown {
+                            self.filePath = url
+                            self.isModified = false
+                        }
                         completion(.success(()))
                     }
                 } catch {
@@ -700,6 +796,8 @@ final class FileSession {
             let colNames = columns
                 .filter { $0.name != "_gridka_rowid" }
                 .map { $0.name }
+            // Snapshot main-thread-owned state before dispatching to queryQueue (US-007).
+            let capturedHasHeaders = hasHeaders
 
             queryQueue.async { [weak self] in
                 do {
@@ -714,7 +812,7 @@ final class FileSession {
                     var lines: [String] = []
 
                     // Header row
-                    if self?.hasHeaders ?? true {
+                    if capturedHasHeaders {
                         let escapedNames = colNames.map { name -> String in
                             if name.contains(delimiter) || name.contains("\"") || name.contains("\n") {
                                 return "\"" + name.replacingOccurrences(of: "\"", with: "\"\"") + "\""
@@ -762,8 +860,10 @@ final class FileSession {
                     try data.write(to: url)
 
                     DispatchQueue.main.async {
-                        self?.filePath = url
-                        self?.isModified = false
+                        if self?.isShutDown != true {
+                            self?.filePath = url
+                            self?.isModified = false
+                        }
                         completion(.success(()))
                     }
                 } catch {
@@ -869,6 +969,10 @@ final class FileSession {
                 let cols = self.extractColumns(from: colResult)
 
                 DispatchQueue.main.async {
+                    guard !self.isShutDown else {
+                        completion(.failure(GridkaError.sessionShutDown))
+                        return
+                    }
                     self.columns = cols
                     self.isModified = true
                     self.invalidateRowCache()
@@ -902,6 +1006,10 @@ final class FileSession {
                 let cols = self.extractColumns(from: colResult)
 
                 DispatchQueue.main.async {
+                    guard !self.isShutDown else {
+                        completion(.failure(GridkaError.sessionShutDown))
+                        return
+                    }
                     self.columns = cols
                     self.isModified = true
                     self.invalidateRowCache()
@@ -1000,6 +1108,10 @@ final class FileSession {
                 let cols = self.extractColumns(from: colResult)
 
                 DispatchQueue.main.async {
+                    guard !self.isShutDown else {
+                        completion(.failure(GridkaError.sessionShutDown))
+                        return
+                    }
                     self.columns = cols
                     self.isModified = true
                     self.invalidateRowCache()
@@ -1032,6 +1144,10 @@ final class FileSession {
                 let cols = self.extractColumns(from: colResult)
 
                 DispatchQueue.main.async {
+                    guard !self.isShutDown else {
+                        completion(.failure(GridkaError.sessionShutDown))
+                        return
+                    }
                     self.columns = cols
                     self.isModified = true
                     self.invalidateRowCache()
@@ -1083,6 +1199,10 @@ final class FileSession {
                 }
 
                 DispatchQueue.main.async {
+                    guard !self.isShutDown else {
+                        completion(.failure(GridkaError.sessionShutDown))
+                        return
+                    }
                     self.totalRows += 1
                     self.viewState.totalFilteredRows += 1
                     self.isModified = true
@@ -1123,6 +1243,10 @@ final class FileSession {
                 }
 
                 DispatchQueue.main.async {
+                    guard !self.isShutDown else {
+                        completion(.failure(GridkaError.sessionShutDown))
+                        return
+                    }
                     self.totalRows = newTotal
                     self.isModified = true
                     self.invalidateRowCache()
@@ -1198,23 +1322,17 @@ final class FileSession {
                 return
             }
 
-            // Check generation before proceeding to per-column distribution queries
-            var earlyAbort = false
-            DispatchQueue.main.sync {
-                if self.summaryGeneration != generation { earlyAbort = true }
-            }
-            if earlyAbort { return }
+            // Check generation before proceeding to per-column distribution queries.
+            // summaryGeneration is protected by os_unfair_lock, so this read is safe
+            // from queryQueue without blocking main (eliminates deadlock risk).
+            if self.summaryGeneration != generation { return }
 
             // Step 2: Per-column distribution queries
             var summaries: [String: ColumnSummary] = [:]
 
             for col in currentColumns {
-                // Check generation before each column query
-                var shouldAbort = false
-                DispatchQueue.main.sync {
-                    if self.summaryGeneration != generation { shouldAbort = true }
-                }
-                if shouldAbort { return }
+                // Check generation before each column query (lock-protected, no main-thread sync)
+                if self.summaryGeneration != generation { return }
 
                 let card = cardinalityMap[col.name] ?? (distinct: 0, nulls: 0)
                 let displayType = self.mapDisplayType(from: col.duckDBType)
@@ -1248,10 +1366,10 @@ final class FileSession {
                 )
             }
 
-            // Dispatch results to main thread, checking generation for staleness
+            // Dispatch results to main thread, checking generation and shutdown for staleness
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
-                guard self.summaryGeneration == generation else { return }
+                guard !self.isShutDown, self.summaryGeneration == generation else { return }
                 self.columnSummaries = summaries
                 self.onSummariesComputed?()
             }
@@ -1365,6 +1483,10 @@ final class FileSession {
             do {
                 try self.engine.execute(sql)
                 DispatchQueue.main.async {
+                    guard !self.isShutDown else {
+                        completion(.failure(GridkaError.sessionShutDown))
+                        return
+                    }
                     self.rowCache.invalidatePage(pageIndex)
                     self.editedCells.insert(EditedCell(rowid: rowid, column: column))
                     self.isModified = true
@@ -2023,26 +2145,57 @@ final class FileSession {
         let rows: [[String]]
     }
 
-    /// Returns true if `sql` contains a semicolon outside of single-quoted string literals.
-    /// Handles SQL-standard doubled single quotes (`''`) as an escaped quote inside a literal.
+    /// Returns true if `sql` contains a semicolon outside of quoted contexts and SQL comments.
+    /// Tracked contexts: single-quoted string literals (`'...'`), double-quoted identifiers
+    /// (`"..."`), `--` line comments, and `/* */` block comments. Both quote styles handle
+    /// SQL-standard doubled-character escaping (`''` and `""`).
     static func containsSemicolonOutsideQuotes(_ sql: String) -> Bool {
-        var inString = false
+        var quoteChar: Character? = nil  // non-nil when inside '...' or "..."
         var i = sql.startIndex
         while i < sql.endIndex {
             let ch = sql[i]
-            if inString {
-                if ch == "'" {
+            if let q = quoteChar {
+                // Inside a quoted region — only the matching quote can end it
+                if ch == q {
                     let next = sql.index(after: i)
-                    if next < sql.endIndex && sql[next] == "'" {
-                        // Escaped quote (''), skip both
+                    if next < sql.endIndex && sql[next] == q {
+                        // Doubled quote escape (''/"""), skip both
                         i = sql.index(after: next)
                         continue
                     }
-                    inString = false
+                    quoteChar = nil
                 }
             } else {
-                if ch == "'" {
-                    inString = true
+                if ch == "'" || ch == "\"" {
+                    quoteChar = ch
+                } else if ch == "-" {
+                    // Check for -- line comment
+                    let next = sql.index(after: i)
+                    if next < sql.endIndex && sql[next] == "-" {
+                        // Skip to end of line
+                        i = sql.index(after: next)
+                        while i < sql.endIndex && sql[i] != "\n" {
+                            i = sql.index(after: i)
+                        }
+                        continue
+                    }
+                } else if ch == "/" {
+                    // Check for /* block comment */
+                    let next = sql.index(after: i)
+                    if next < sql.endIndex && sql[next] == "*" {
+                        i = sql.index(after: next)
+                        while i < sql.endIndex {
+                            if sql[i] == "*" {
+                                let afterStar = sql.index(after: i)
+                                if afterStar < sql.endIndex && sql[afterStar] == "/" {
+                                    i = sql.index(after: afterStar)
+                                    break
+                                }
+                            }
+                            i = sql.index(after: i)
+                        }
+                        continue
+                    }
                 } else if ch == ";" {
                     return true
                 }
@@ -2296,7 +2449,9 @@ final class FileSession {
                 }
 
                 DispatchQueue.main.async {
-                    self.viewState.totalFilteredRows = count
+                    if !self.isShutDown {
+                        self.viewState.totalFilteredRows = count
+                    }
                     completion?()
                 }
             } catch {
