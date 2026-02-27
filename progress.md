@@ -1593,3 +1593,22 @@
   - SQL has two quoting contexts: single quotes for literals, double quotes for identifiers -- both must be tracked by any token-level scanner
   - The unified `quoteChar` approach is simpler and more correct than separate boolean flags
 ----
+
+## 2026-02-27, 13:35 - US-002 - Add computed-expression injection regression tests
+- Created Tests/ExpressionInjectionTests.swift with 36 comprehensive regression tests covering all US-002 acceptance criteria:
+  - **Semicolons in single-quoted string literals (AC-1):** 6 tests -- REPLACE(col, ';', ','), multiple semicolons, equality checks, doubled-quote escapes, between two strings, empty string before bare semicolon
+  - **Semicolons in double-quoted identifiers:** 2 tests -- "col;name", doubled double-quote escape
+  - **Semicolons in SQL comments (AC-2):** 4 tests -- line comments (--), multiline line comments, block comments (/* */), multiline block comments
+  - **Semicolons outside literals/comments rejected (AC-3):** 7 tests -- bare semicolon, after expression, multi-statement injection, between expressions, at start, after closed string/identifier
+  - **Edge cases:** 9 tests -- empty expression, no semicolon, only-quoted string, unterminated quotes/comments, double-quoted identifier bypass attempt, nested comment syntax, dash/slash-star inside strings, mixed quoting, whitespace-surrounded semicolons
+  - **Runtime add path applies same validation as preview (AC-4):** 3 tests -- preview path rejects injection (integration with loaded FileSession), preview path accepts semicolon in literal (integration), battery test verifying both paths use identical containsSemicolonOutsideQuotes validator
+- Regenerated Gridka.xcodeproj via xcodegen to include new test file
+- Files changed: Tests/ExpressionInjectionTests.swift (new), Gridka.xcodeproj/project.pbxproj (regen), plans/prd.json
+- Build succeeds, all 130 unit tests pass (36 new + 94 existing)
+- **Learnings for future iterations:**
+  - FileSession(filePath:) requires a real file URL -- use requireFixture(at:) + loadSessionFully() for integration tests that call fetchComputedColumnPreview
+  - containsSemicolonOutsideQuotes is a static method, so pure validation tests don't need a FileSession instance -- only integration tests for the preview/runtime paths need one
+  - xcodegen with path: Tests automatically picks up new .swift files in Tests/ -- no manual pbxproj edits needed
+  - The integration test for "accepted semicolon in literal" uses a real column name from the forex fixture ("close") to exercise the full preview path successfully
+  - Unterminated quotes/comments are treated as still-open by the scanner -- this is the safe behavior (avoids false positives on malformed but non-malicious expressions)
+----
