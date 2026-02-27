@@ -1802,3 +1802,29 @@
   - `createSummarySession` is called from main thread in practice (via `onMain` in AppDelegate), but as a `static func` it has no thread contract — the lock makes it safe regardless
   - `dropSummaryTable()` uses strong captures of `engine` to ensure cleanup even if `FileSession` deallocates before the queue runs — important for test cleanup too
 ----
+
+## 2026-02-27, 15:48 - US-011 - Add crash-focused regression suite for teardown and concurrency
+- Created Tests/CrashRegressionSuiteTests.swift with 10 regression tests targeting known crash signatures
+- Criterion 1 - Repeated tab close with sparkline headers: 3 tests
+  - testRepeatedTabCloseWithPopulatedSparklineHeaders: 5 cycles of full load, compute summaries, populate SparklineHeaderCells, shutdown, invalidate, clearSummary, dealloc
+  - testSparklineHeaderCellCopyDeallocWithPopulatedSummary: 20 iterations of NSCopyObject copy+dealloc with populated summaries
+  - testSparklineHeaderCellRapidPopulateClearCycles: 50 rapid populate/clear cycles across all 4 Distribution variants
+- Criterion 2 - Summary computation invalidation without deadlock: 2 tests
+  - testSummaryComputeInvalidateCyclesNoDeadlock: 20 rapid compute+invalidate cycles with tight 15s timeout
+  - testSummaryGenerationReadWriteNoContention: 5 sequential rounds verifying os_unfair_lock read/write contention safety
+- Criterion 3 - Stale fetch completion reload clamping: 2 tests
+  - testStaleFetchClampedAfterFilterReducesRows: fetch page then apply impossible filter, verify no crash
+  - testBurstStaleFetchesWithFilterChange: 20 concurrent fetches made stale by sort change
+- Criterion 4 - Concurrent summary session creation name uniqueness: 2 tests
+  - testConcurrentSummarySessionNamesAreUnique: 10 concurrent createSummarySession calls
+  - testNextSummaryCounterConcurrentUniqueness: 500 concurrent counter increments
+- Integration test: testFullWindowCloseLifecycleWithActiveSummariesAndFetches: 3 cycles of complete windowWillClose sequence with in-flight fetches
+- Files changed: Tests/CrashRegressionSuiteTests.swift (new), Gridka.xcodeproj/project.pbxproj (regen), plans/prd.json
+- Build succeeds, all 172 unit tests pass (10 new + 162 existing)
+- **Learnings for future iterations:**
+  - XCTest onSummariesComputed callback pattern is fragile when dispatching multiple onMain blocks that overwrite the callback - use sequential waits per round instead of a shared counter
+  - SparklineHeaderCell copy(with:) override is critical: NSTableHeaderView uses NSCopyObject (bitwise copy) which does not retain Swift stored properties
+  - The testSummaryComputeInvalidateCyclesNoDeadlock test with a tight timeout is the most direct deadlock regression test
+  - Tests that use xcodebuild test-without-building run against the last built binary - always build-for-testing first after editing test files
+  - git add of xcodeproj/plans requires -f flag since they are in .gitignore (tracked via force-add)
+----
