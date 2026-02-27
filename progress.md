@@ -1612,3 +1612,19 @@
   - The integration test for "accepted semicolon in literal" uses a real column name from the forex fixture ("close") to exercise the full preview path successfully
   - Unterminated quotes/comments are treated as still-open by the scanner -- this is the safe behavior (avoids false positives on malformed but non-malicious expressions)
 ----
+
+## 2026-02-27, 13:49 - US-003 - Harden Sparkline header teardown during tab/window close
+- Added `isTornDown` flag to `TableViewController` that prevents `updateSparklines()`, `configureColumns()`, and `settingsDidChange()` from mutating header cells after teardown
+- Made `tearDown()` idempotent with guard on `isTornDown` flag -- safe to call multiple times
+- `tearDown()` now calls `fileSession?.invalidateColumnSummaries()` before clearing header cells, bumping the generation counter so in-flight queryQueue computations discard results
+- Restructured `windowWillClose()` to nil `onSummariesComputed` and `onModifiedChanged` callbacks BEFORE calling `tearDown()` -- eliminates the race window where a queued `main.async` dispatch could fire `updateSparklines()` between tearDown and TabContext release
+- Added deterministic teardown ordering comments documenting the 4-step close sequence
+- Files changed: Sources/UI/TableViewController.swift, Sources/App/AppDelegate.swift, plans/prd.json
+- Build succeeds, all 130 tests pass
+- **Learnings for future iterations:**
+  - The `SparklineHeaderCell.__ivar_destroyer` crash is caused by NSCopyObject bitwise-copying Swift stored properties with wrong reference counts -- the `copy(with:)` override handles this, but the real fix is ensuring no sparkline data exists on header cells when they're about to be deallocated
+  - `onSummariesComputed` must be niled BEFORE `tearDown()` in `windowWillClose()` -- niling after leaves a window where the already-dispatched `main.async` callback could fire
+  - `invalidateColumnSummaries()` bumps the generation counter, which causes in-flight queryQueue computations to abort before dispatching results to main thread
+  - `tearDown()` should be idempotent in AppKit code -- multiple close paths (windowShouldClose, windowWillClose, tab close) can converge
+  - The `isTornDown` flag is a defense-in-depth pattern: even if callbacks are properly niled, the flag prevents any code path from touching header cells after teardown
+----

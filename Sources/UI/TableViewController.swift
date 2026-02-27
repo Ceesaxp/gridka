@@ -113,6 +113,11 @@ final class TableViewController: NSViewController {
     /// Tracks the previous sparkline setting to detect transitions in settingsDidChange.
     private var sparklinesWereEnabled: Bool = SettingsManager.shared.showSparklines
 
+    /// Set to `true` by `tearDown()`. Guards `updateSparklines()` and other UI-mutation
+    /// paths so that queued main-thread callbacks arriving after teardown cannot repopulate
+    /// header cell sparkline data on cells that are about to be deallocated. (US-003)
+    private(set) var isTornDown = false
+
     /// Standard header height when sparklines are disabled.
     private static let standardHeaderHeight: CGFloat = 22
 
@@ -321,6 +326,7 @@ final class TableViewController: NSViewController {
     }
 
     @objc private func settingsDidChange(_ notification: Notification) {
+        guard !isTornDown else { return }
         updateFormattersFromSettings()
         reloadVisibleRows()
 
@@ -386,9 +392,21 @@ final class TableViewController: NSViewController {
 
     /// Disconnects all delegate/dataSource/target pointers so the view hierarchy
     /// can be torn down safely after the TVC is released.
+    ///
+    /// **Idempotent** — safe to call more than once. The `isTornDown` flag prevents
+    /// double-cleanup and also blocks `updateSparklines()` from repopulating header
+    /// cells after teardown has started. (US-003)
     func tearDown() {
+        guard !isTornDown else { return }
+        isTornDown = true
+
         NotificationCenter.default.removeObserver(self)
         cancelEdit()
+
+        // Invalidate summaries on the session FIRST — this bumps the generation
+        // counter so any in-flight queryQueue computation will discard its results
+        // rather than dispatching a stale onSummariesComputed callback. (US-003)
+        fileSession?.invalidateColumnSummaries()
 
         // Clear sparkline summaries from all header cells before the table view
         // is released — prevents dangling ColumnSummary pointers during dealloc.
@@ -416,6 +434,8 @@ final class TableViewController: NSViewController {
     // MARK: - Column Configuration
 
     func configureColumns(_ columns: [ColumnDescriptor]) {
+        guard !isTornDown else { return }
+
         // Remember all descriptors (excluding _gridka_rowid) for hide/show management
         allColumnDescriptors = columns.filter { $0.name != "_gridka_rowid" }
 
@@ -568,6 +588,7 @@ final class TableViewController: NSViewController {
     /// and aborts if it changed (meaning configureColumns was called during iteration,
     /// which would have cleared and replaced all header cells). (US-103)
     func updateSparklines() {
+        guard !isTornDown else { return }
         guard SettingsManager.shared.showSparklines else { return }
         guard let session = fileSession else { return }
         let generation = columnConfigGeneration

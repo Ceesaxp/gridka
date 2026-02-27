@@ -2032,9 +2032,19 @@ extension AppDelegate: NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         guard let win = notification.object as? NSWindow else { return }
 
-        // Disconnect all delegate/dataSource/target pointers immediately.
+        // Deterministic teardown order (US-003):
+        // 1. Nil session callbacks FIRST — prevents queued main.async dispatches
+        //    from firing updateSparklines() after teardown starts.
+        // 2. Close floating panels.
+        // 3. TearDown the table view controller (clears sparklines, disconnects delegates).
+        // 4. Release the TabContext.
         if let tab = windowTabs[win] {
-            // Close floating panels if they belong to this tab's session
+            // Step 1: Disconnect callbacks before any teardown so in-flight
+            // queryQueue completions cannot fire UI updates. (US-003)
+            tab.fileSession?.onSummariesComputed = nil
+            tab.fileSession?.onModifiedChanged = nil
+
+            // Step 2: Close floating panels if they belong to this tab's session
             if let session = tab.fileSession {
                 FrequencyPanelController.closeIfOwned(by: session)
                 ComputedColumnPanelController.closeIfOwned(by: session)
@@ -2043,12 +2053,13 @@ extension AppDelegate: NSWindowDelegate {
                 // Drop the temp table when closing a summary tab (US-023)
                 session.dropSummaryTable()
             }
+
+            // Step 3: TearDown clears sparkline data, disconnects all delegates,
+            // and marks the TVC as torn down. Idempotent. (US-003)
             tab.tableViewController?.tearDown()
-            tab.fileSession?.onSummariesComputed = nil
-            tab.fileSession?.onModifiedChanged = nil
         }
 
-        // Release the TabContext (and its FileSession, DuckDBEngine, etc.).
+        // Step 4: Release the TabContext (and its FileSession, DuckDBEngine, etc.).
         // The window itself is safe because isReleasedWhenClosed = false,
         // so AppKit won't send an extra release that ARC doesn't expect.
         windowTabs.removeValue(forKey: win)
