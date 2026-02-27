@@ -575,8 +575,13 @@ final class FileSession {
                 }
 
                 // Write to temp file in caches directory
-                let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-                    .appendingPathComponent("com.gridka.app")
+                guard let baseCacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+                    DispatchQueue.main.async {
+                        completion(.failure(GridkaError.loadFailed("Unable to locate system cache directory")))
+                    }
+                    return
+                }
+                let cacheDir = baseCacheDir.appendingPathComponent("com.gridka.app")
                 try FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
                 let tempFile = cacheDir.appendingPathComponent("transcode-\(UUID().uuidString).csv")
                 try utf8Data.write(to: tempFile)

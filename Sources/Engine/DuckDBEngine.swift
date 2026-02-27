@@ -96,13 +96,23 @@ final class DuckDBEngine {
             throw GridkaError.databaseInitFailed
         }
 
-        let connectState = duckdb_connect(database!, &connection)
+        guard let db = database else {
+            throw GridkaError.databaseInitFailed
+        }
+
+        let connectState = duckdb_connect(db, &connection)
         guard connectState == DuckDBSuccess else {
             duckdb_close(&database)
             throw GridkaError.connectionFailed
         }
 
-        try configureDatabaseSettings()
+        do {
+            try configureDatabaseSettings()
+        } catch {
+            duckdb_disconnect(&connection)
+            duckdb_close(&database)
+            throw error
+        }
     }
 
     deinit {
@@ -116,6 +126,10 @@ final class DuckDBEngine {
 
     @discardableResult
     func execute(_ sql: String) throws -> DuckDBResult {
+        guard let conn = connection else {
+            throw GridkaError.queryFailed("No active database connection")
+        }
+
         if logSQL {
             logger.info("SQL: \(sql, privacy: .public)")
         }
@@ -123,7 +137,7 @@ final class DuckDBEngine {
         let startTime = logSQL ? CFAbsoluteTimeGetCurrent() : 0
 
         var result = duckdb_result()
-        let state = duckdb_query(connection!, sql, &result)
+        let state = duckdb_query(conn, sql, &result)
 
         if state == DuckDBError {
             if logSQL {
@@ -165,7 +179,9 @@ final class DuckDBEngine {
         let memoryLimitStr = String(format: "%.1fGB", memoryLimitGB)
         try execute("SET memory_limit = '\(memoryLimitStr)'")
 
-        let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+        guard let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+            throw GridkaError.loadFailed("Unable to locate system cache directory")
+        }
         let tempDir = cacheDir.appendingPathComponent("com.gridka.app/duckdb-temp")
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
         try execute("SET temp_directory = '\(tempDir.path)'")
