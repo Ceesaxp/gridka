@@ -61,6 +61,12 @@ final class FileSession {
     /// Callback invoked on the main thread when column summaries finish computing.
     var onSummariesComputed: (() -> Void)?
 
+    /// Set to `true` during tab close. Async query completions that land on
+    /// the main thread after shutdown check this flag and skip state mutations,
+    /// while still firing completion handlers for caller bookkeeping. (US-004)
+    /// Main-thread only.
+    private(set) var isShutDown = false
+
     private(set) var tableName: String = "data"
     private(set) var columns: [ColumnDescriptor] = []
     private(set) var viewState: ViewState
@@ -253,6 +259,25 @@ final class FileSession {
         }
     }
 
+    // MARK: - Shutdown (US-004)
+
+    /// Marks this session as shut down. After this call, async query completions
+    /// that land on the main thread will skip state mutations but still fire
+    /// completion handlers so callers can perform bookkeeping (e.g., clearing
+    /// `fetchingPages` in TableViewController).
+    ///
+    /// Must be called on the main thread, typically from `windowWillClose(_:)`
+    /// before tearing down the TableViewController.
+    func shutdown() {
+        dispatchPrecondition(condition: .onQueue(.main))
+        isShutDown = true
+        // Bump all generation counters so in-flight queries are also marked stale
+        // by the existing generation-check logic.
+        viewStateGeneration += 1
+        profilerGeneration += 1
+        summaryGeneration += 1
+    }
+
     // MARK: - Memory Management
 
     /// Updates the DuckDB memory limit for this session's engine.
@@ -282,12 +307,14 @@ final class FileSession {
                     // Extract delimiter (column 0)
                     if case .string(let delim) = result.value(row: 0, col: 0) {
                         DispatchQueue.main.async {
+                            guard !self.isShutDown else { return }
                             self.detectedDelimiter = delim
                         }
                     }
                     // Extract HasHeader (column 4)
                     if case .boolean(let hasHeader) = result.value(row: 0, col: 4) {
                         DispatchQueue.main.async {
+                            guard !self.isShutDown else { return }
                             self.detectedHasHeader = hasHeader
                             self.hasHeaders = hasHeader
                         }
@@ -345,6 +372,10 @@ final class FileSession {
                 let page = self.extractPage(from: result, startRow: 0, columns: cols)
 
                 DispatchQueue.main.async {
+                    guard !self.isShutDown else {
+                        completion(.failure(GridkaError.queryFailed("Session shut down")))
+                        return
+                    }
                     self.columns = cols
                     self.viewState.totalFilteredRows = result.rowCount
                     self.rowCache.insertPage(page)
@@ -398,6 +429,10 @@ final class FileSession {
                 let cols = self.extractColumns(from: colResult)
 
                 DispatchQueue.main.async {
+                    guard !self.isShutDown else {
+                        completion(.failure(GridkaError.queryFailed("Session shut down")))
+                        return
+                    }
                     self.columns = cols
                     self.isFullyLoaded = true
                     self.totalRows = totalRows
@@ -435,12 +470,10 @@ final class FileSession {
                 )
 
                 DispatchQueue.main.async {
-                    // Skip cache insert for stale results: if viewState changed
-                    // since this fetch was dispatched, the cache was already
-                    // invalidated and these rows are from an obsolete state.
+                    // Skip cache insert for stale or shut-down results.
                     // Always call completion so callers can clear bookkeeping
-                    // state (e.g. fetchingPages in TableViewController).
-                    if generation == self.viewStateGeneration {
+                    // state (e.g. fetchingPages in TableViewController). (US-004)
+                    if !self.isShutDown && generation == self.viewStateGeneration {
                         self.rowCache.insertPage(page)
                     }
                     completion(.success(page))
@@ -543,6 +576,10 @@ final class FileSession {
                 try? FileManager.default.removeItem(at: tempFile)
 
                 DispatchQueue.main.async {
+                    guard !self.isShutDown else {
+                        completion(.failure(GridkaError.queryFailed("Session shut down")))
+                        return
+                    }
                     self.columns = cols
                     self.isFullyLoaded = true
                     self.totalRows = totalRows
@@ -597,6 +634,10 @@ final class FileSession {
                 let cols = self.extractColumns(from: colResult)
 
                 DispatchQueue.main.async {
+                    guard !self.isShutDown else {
+                        completion(.failure(GridkaError.queryFailed("Session shut down")))
+                        return
+                    }
                     self.columns = cols
                     self.isFullyLoaded = true
                     self.totalRows = totalRows
@@ -646,7 +687,9 @@ final class FileSession {
                 }
                 try self.engine.execute(sql)
                 DispatchQueue.main.async {
-                    self.isModified = false
+                    if !self.isShutDown {
+                        self.isModified = false
+                    }
                     completion(.success(()))
                 }
             } catch {
@@ -684,8 +727,10 @@ final class FileSession {
                     }
                     try self.engine.execute(sql)
                     DispatchQueue.main.async {
-                        self.filePath = url
-                        self.isModified = false
+                        if !self.isShutDown {
+                            self.filePath = url
+                            self.isModified = false
+                        }
                         completion(.success(()))
                     }
                 } catch {
@@ -762,8 +807,10 @@ final class FileSession {
                     try data.write(to: url)
 
                     DispatchQueue.main.async {
-                        self?.filePath = url
-                        self?.isModified = false
+                        if self?.isShutDown != true {
+                            self?.filePath = url
+                            self?.isModified = false
+                        }
                         completion(.success(()))
                     }
                 } catch {
@@ -869,6 +916,10 @@ final class FileSession {
                 let cols = self.extractColumns(from: colResult)
 
                 DispatchQueue.main.async {
+                    guard !self.isShutDown else {
+                        completion(.failure(GridkaError.queryFailed("Session shut down")))
+                        return
+                    }
                     self.columns = cols
                     self.isModified = true
                     self.invalidateRowCache()
@@ -902,6 +953,10 @@ final class FileSession {
                 let cols = self.extractColumns(from: colResult)
 
                 DispatchQueue.main.async {
+                    guard !self.isShutDown else {
+                        completion(.failure(GridkaError.queryFailed("Session shut down")))
+                        return
+                    }
                     self.columns = cols
                     self.isModified = true
                     self.invalidateRowCache()
@@ -1000,6 +1055,10 @@ final class FileSession {
                 let cols = self.extractColumns(from: colResult)
 
                 DispatchQueue.main.async {
+                    guard !self.isShutDown else {
+                        completion(.failure(GridkaError.queryFailed("Session shut down")))
+                        return
+                    }
                     self.columns = cols
                     self.isModified = true
                     self.invalidateRowCache()
@@ -1032,6 +1091,10 @@ final class FileSession {
                 let cols = self.extractColumns(from: colResult)
 
                 DispatchQueue.main.async {
+                    guard !self.isShutDown else {
+                        completion(.failure(GridkaError.queryFailed("Session shut down")))
+                        return
+                    }
                     self.columns = cols
                     self.isModified = true
                     self.invalidateRowCache()
@@ -1083,6 +1146,10 @@ final class FileSession {
                 }
 
                 DispatchQueue.main.async {
+                    guard !self.isShutDown else {
+                        completion(.failure(GridkaError.queryFailed("Session shut down")))
+                        return
+                    }
                     self.totalRows += 1
                     self.viewState.totalFilteredRows += 1
                     self.isModified = true
@@ -1123,6 +1190,10 @@ final class FileSession {
                 }
 
                 DispatchQueue.main.async {
+                    guard !self.isShutDown else {
+                        completion(.failure(GridkaError.queryFailed("Session shut down")))
+                        return
+                    }
                     self.totalRows = newTotal
                     self.isModified = true
                     self.invalidateRowCache()
@@ -1248,10 +1319,10 @@ final class FileSession {
                 )
             }
 
-            // Dispatch results to main thread, checking generation for staleness
+            // Dispatch results to main thread, checking generation and shutdown for staleness
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
-                guard self.summaryGeneration == generation else { return }
+                guard !self.isShutDown, self.summaryGeneration == generation else { return }
                 self.columnSummaries = summaries
                 self.onSummariesComputed?()
             }
@@ -1365,6 +1436,10 @@ final class FileSession {
             do {
                 try self.engine.execute(sql)
                 DispatchQueue.main.async {
+                    guard !self.isShutDown else {
+                        completion(.failure(GridkaError.queryFailed("Session shut down")))
+                        return
+                    }
                     self.rowCache.invalidatePage(pageIndex)
                     self.editedCells.insert(EditedCell(rowid: rowid, column: column))
                     self.isModified = true
@@ -2327,7 +2402,9 @@ final class FileSession {
                 }
 
                 DispatchQueue.main.async {
-                    self.viewState.totalFilteredRows = count
+                    if !self.isShutDown {
+                        self.viewState.totalFilteredRows = count
+                    }
                     completion?()
                 }
             } catch {

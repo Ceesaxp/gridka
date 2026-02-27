@@ -62,7 +62,7 @@
         "Tests pass"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "Crash correlation includes FileSession.deinit stack (Gridka-2026-02-26-210821)."
     },
     {

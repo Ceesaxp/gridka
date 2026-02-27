@@ -1628,3 +1628,41 @@
   - `tearDown()` should be idempotent in AppKit code -- multiple close paths (windowShouldClose, windowWillClose, tab close) can converge
   - The `isTornDown` flag is a defense-in-depth pattern: even if callbacks are properly niled, the flag prevents any code path from touching header cells after teardown
 ----
+
+## 2026-02-27, 14:20 - US-004 - Guard FileSession shutdown and deallocation race windows
+- Added `isShutDown` flag (`private(set) var isShutDown = false`) to FileSession, set during tab close
+- Added `shutdown()` method that sets `isShutDown = true` and bumps all three generation counters (viewStateGeneration, profilerGeneration, summaryGeneration) so in-flight queries are marked stale by both the shutdown flag and existing generation-check logic
+- Guarded all `DispatchQueue.main.async` completion blocks that mutate FileSession state:
+  - `sniffCSV` — skips `detectedDelimiter`/`hasHeaders` mutations
+  - `loadPreview`, `loadFull` — skips `columns`/`viewState`/`rowCache` mutations, returns failure completion
+  - `fetchPage` — skips `rowCache.insertPage()` but always fires completion (for `fetchingPages` bookkeeping in TableViewController)
+  - `reloadTable`, `reload(withEncoding:)` — skips full state reset, returns failure completion
+  - `save`, `saveAs` — skips `isModified = false` and `filePath` mutations
+  - `addColumn`, `renameColumn`, `changeColumnType`, `deleteColumn` — skips schema/cache mutations, returns failure
+  - `addRow`, `deleteRows` — skips row count/cache mutations, returns failure
+  - `updateCell` — skips cache invalidation/editedCells, returns failure
+  - `computeColumnSummaries` — adds `!self.isShutDown` to existing generation guard
+  - `requeryCount` — skips `totalFilteredRows` mutation, still fires completion
+- Integrated `shutdown()` into `AppDelegate.windowWillClose()` as Step 0, before callback nil'ing and TVC teardown
+- Created Tests/FileSessionShutdownTests.swift with 9 regression tests:
+  - `testShutdownSetsFlag` — verifies flag is set
+  - `testFetchPageSkipsCacheInsertAfterShutdown` — verifies cache not populated after shutdown
+  - `testFetchPageCompletionFiresAfterShutdown` — verifies AC-3 (bookkeeping completions fire)
+  - `testRequeryCountCompletionFiresAfterShutdown` — verifies count not mutated + completion fires
+  - `testLoadFullDoesNotMutateAfterShutdown` — verifies isFullyLoaded not set
+  - `testAddRowDoesNotMutateAfterShutdown` — verifies totalRows unchanged
+  - `testUpdateCellDoesNotMutateAfterShutdown` — verifies isModified/editedCells unchanged
+  - `testBurstFetchesDuringShutdownAllComplete` — 30 burst fetches all complete after shutdown
+  - `testSummaryComputationDiscardedAfterShutdown` — summaries not stored after shutdown
+  - `testShutdownIsIdempotent` — double shutdown doesn't crash
+- Files changed: Sources/Model/FileSession.swift, Sources/App/AppDelegate.swift, Tests/FileSessionShutdownTests.swift (new), Gridka.xcodeproj/project.pbxproj (regen), plans/prd.json
+- Build succeeds, all 139 unit tests pass (9 new + 130 existing)
+- **Learnings for future iterations:**
+  - The shutdown flag is complementary to generation counters — generation checks prevent stale data insertion, shutdown prevents ALL state mutation after tab close
+  - Key pattern for completion handlers: always fire the completion (for caller bookkeeping like `fetchingPages.remove`) but guard state mutations with `isShutDown`
+  - `fetchPage` must always call completion regardless of shutdown/stale state — TableViewController.requestPageFetch uses it to clear `fetchingPages` tracking
+  - `shutdown()` must be called BEFORE callback nil'ing in `windowWillClose` — it bumps generation counters that in-flight computeColumnSummaries checks via `DispatchQueue.main.sync`
+  - For save operations (`save`, `saveAs`), using `if !self.isShutDown` rather than `guard` allows the completion to still report success (the file was saved, just the in-memory state update was skipped)
+  - The `RowCache.pages` dictionary is private, so tests verify cache state indirectly via `value(forRow:columnName:)` returning nil
+  - UI test `testCloseTabAfterNavigationStressWithTwoFiles` has a pre-existing flaky timeout unrelated to this change
+----

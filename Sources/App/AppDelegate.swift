@@ -2039,6 +2039,10 @@ extension AppDelegate: NSWindowDelegate {
         // 3. TearDown the table view controller (clears sparklines, disconnects delegates).
         // 4. Release the TabContext.
         if let tab = windowTabs[win] {
+            // Step 0: Mark the session as shut down so in-flight queryQueue
+            // completions skip state mutations on the main thread. (US-004)
+            tab.fileSession?.shutdown()
+
             // Step 1: Disconnect callbacks before any teardown so in-flight
             // queryQueue completions cannot fire UI updates. (US-003)
             tab.fileSession?.onSummariesComputed = nil
