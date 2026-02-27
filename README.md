@@ -19,11 +19,19 @@ Most CSV tools either choke on large files (Excel, Numbers), consume absurd memo
 - **Column sorting** — click to sort, Shift+click for multi-column sort
 - **Filtering** — type-aware filters per column (text, numeric, date, boolean operators)
 - **Global search** — `Cmd+F` to search across all columns with match highlighting
-- **Column management** — resize, reorder, hide/show, pin, auto-fit
+- **Column management** — resize, reorder, hide/show, rename, delete, auto-fit
 - **Cell inspection** — detail pane for long text, URLs, JSON content
 - **Cell editing** — double-click to edit, save back to CSV
 - **Multi-tab** — open multiple files in tabs within a single window
 - **Quick Look** — preview CSV files in Finder via Quick Look extension
+
+### Analysis
+
+- **Column sparklines** — mini distribution charts in every column header; click to open profiler
+- **Column profiler** — sidebar with stats (min, max, mean, median, stddev), distribution histogram, and top values
+- **Value frequency** — floating panel with histogram and sortable value-count table; click a value to filter
+- **Computed columns** — add formula columns using DuckDB SQL expressions with live preview
+- **Group By** — visual aggregation builder (COUNT, SUM, AVG, MIN, MAX, STDDEV); results open as a new tab
 
 ## Installation
 
@@ -63,16 +71,29 @@ open Gridka.xcodeproj
 | Shortcut | Action |
 |----------|--------|
 | `Cmd+O` | Open file |
+| `Cmd+S` | Save |
+| `Shift+Cmd+S` | Save As |
+| `Cmd+T` | New tab |
 | `Cmd+W` | Close tab |
 | `Cmd+F` | Toggle search bar |
 | `Cmd+G` / `Shift+Cmd+G` | Find next / previous |
 | `Cmd+C` | Copy cell value |
 | `Shift+Cmd+C` | Copy entire row |
+| `Option+Cmd+C` | Copy column (visible rows) |
 | `Shift+Cmd+D` | Toggle detail pane |
+| `Shift+Cmd+P` | Toggle column profiler |
+| `Option+Cmd+T` | Show analysis toolbar |
+| `Option+Cmd+F` | Add computed column |
+| `Option+Cmd+G` | Group By |
+| `Option+Cmd+N` | Add column |
+| `Option+Cmd+R` | Add row |
+| `Cmd+Delete` | Delete selected row(s) |
 | Click header | Sort ascending/descending/clear |
 | Shift+click header | Multi-column sort |
-| Right-click header | Filter / hide column |
+| Right-click header | Filter / hide / rename / frequency |
+| Right-click cell | Copy / filter by value / exclude value |
 | Double-click divider | Auto-fit column width |
+| Double-click cell | Inline edit |
 | Drag & drop | Open CSV by dragging onto window |
 
 ## Architecture
@@ -98,7 +119,8 @@ Gridka/
 ├── QuickLookExtension/   # Quick Look preview for CSV files
 ├── Libraries/            # Vendored DuckDB (duckdb.h + libduckdb)
 ├── Resources/            # Assets, Info.plist, PrivacyInfo
-├── Tests/                # Unit + integration tests
+├── Tests/                # Unit, integration, and regression tests
+├── UITests/              # XCUITest UI automation
 ├── scripts/              # Build and release automation
 └── docs/                 # App Store submission guide
 ```

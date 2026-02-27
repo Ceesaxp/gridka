@@ -159,7 +159,17 @@ final class HelpWindowController: NSWindowController {
 
         result.append(styledSection("View"))
         result.append(styledShortcut("\u{21E7}\u{2318}D", "Toggle detail pane"))
+        result.append(styledShortcut("\u{21E7}\u{2318}P", "Toggle column profiler"))
+        result.append(styledShortcut("\u{2325}\u{2318}T", "Show analysis toolbar"))
         result.append(styledShortcut("\u{2318},", "Settings"))
+        result.append(spacing())
+
+        result.append(styledSection("Analysis"))
+        result.append(styledShortcut("\u{2325}\u{2318}F", "Add computed column"))
+        result.append(styledShortcut("\u{2325}\u{2318}G", "Group By"))
+        result.append(styledShortcut("\u{2325}\u{2318}N", "Add column"))
+        result.append(styledShortcut("\u{2325}\u{2318}R", "Add row"))
+        result.append(styledShortcut("\u{2318}\u{232B}", "Delete selected row(s)"))
         result.append(spacing())
 
         result.append(styledSection("Table"))
@@ -228,6 +238,15 @@ final class HelpWindowController: NSWindowController {
         Search and filters can be used together: search results are further narrowed \
         by any active column filters.
         """))
+        result.append(spacing())
+        result.append(spacing())
+
+        result.append(styledSection("Quick Filter from Analysis"))
+        result.append(styledBody("""
+        You can also create filters by clicking values in the frequency panel or \
+        column profiler. Right-click any cell and choose "Filter by This Value" \
+        or "Exclude This Value" for instant filtering.
+        """))
 
         return result
     }
@@ -281,6 +300,57 @@ final class HelpWindowController: NSWindowController {
         Right-click any cell and choose "Filter by This Value" to instantly create \
         a filter matching that cell's content. This is the fastest way to drill down \
         into your data.
+        """))
+        result.append(spacing())
+        result.append(spacing())
+
+        result.append(styledSection("Column Sparklines"))
+        result.append(styledBody("""
+        Every column header displays a mini distribution chart (sparkline) that \
+        shows the shape of the data at a glance. Click the sparkline area to open \
+        the column profiler sidebar for that column.
+        """))
+        result.append(spacing())
+        result.append(spacing())
+
+        result.append(styledSection("Column Profiler"))
+        result.append(styledBody("""
+        Press Shift+Cmd+P to toggle the profiler sidebar. Select a column (or click \
+        its sparkline) to see:
+
+        \u{2022} Overview — non-null count, distinct values, selectivity
+        \u{2022} Descriptive stats — min, max, mean, median, stddev, Q1, Q3
+        \u{2022} Distribution histogram — auto-binned visual distribution
+        \u{2022} Top 10 values — most frequent values with occurrence counts
+        """))
+        result.append(spacing())
+        result.append(spacing())
+
+        result.append(styledSection("Value Frequency"))
+        result.append(styledBody("""
+        Right-click a column header and choose "Value Frequency…" to open a \
+        floating panel with a bar chart and sortable frequency table. Click any \
+        value in the table to instantly filter the data to that value.
+        """))
+        result.append(spacing())
+        result.append(spacing())
+
+        result.append(styledSection("Computed Columns"))
+        result.append(styledBody("""
+        Press Option+Cmd+F to add a formula column. Enter any DuckDB SQL \
+        expression (e.g. "price * quantity" or "upper(name)"). A live preview \
+        shows the result before you apply. Computed columns appear alongside \
+        regular columns and update automatically when filters or sorts change.
+        """))
+        result.append(spacing())
+        result.append(spacing())
+
+        result.append(styledSection("Group By / Aggregation"))
+        result.append(styledBody("""
+        Press Option+Cmd+G to open the Group By builder. Choose one or more \
+        columns to group by and add aggregation functions (COUNT, SUM, AVG, \
+        MIN, MAX, STDDEV). A live preview shows the grouped results. Click \
+        Apply to open the results as a new read-only tab.
         """))
 
         return result

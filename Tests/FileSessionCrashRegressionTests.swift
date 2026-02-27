@@ -3,59 +3,10 @@ import XCTest
 
 final class FileSessionCrashRegressionTests: XCTestCase {
 
-    private let sensorTelemetryPath = "/Users/andrei/Developer/Swift/Gridka/scripts/screenshots/data/sensor_telemetry.csv"
-    private let cbCompaniesPath = "/Users/andrei/Downloads/cb-companies.csv"
-
-    private func ensureFileExists(_ path: String) throws -> URL {
-        guard FileManager.default.fileExists(atPath: path) else {
-            throw XCTSkip("Missing test fixture: \(path)")
-        }
-        return URL(fileURLWithPath: path)
-    }
-
-    private func onMain(_ block: @escaping () -> Void) {
-        if Thread.isMainThread {
-            block()
-        } else {
-            DispatchQueue.main.async(execute: block)
-        }
-    }
-
-    private func waitForLoadFull(_ session: FileSession, timeout: TimeInterval = 180) throws {
-        let done = expectation(description: "loadFull")
-        var loadError: Error?
-        onMain {
-            session.loadFull(progress: { _ in }) { result in
-                if case .failure(let err) = result {
-                    loadError = err
-                }
-                done.fulfill()
-            }
-        }
-        wait(for: [done], timeout: timeout)
-        if let loadError {
-            throw loadError
-        }
-    }
-
-    private func queueFetch(_ session: FileSession, index: Int, completion: @escaping (Result<RowCache.Page, Error>) -> Void) {
-        onMain {
-            session.fetchPage(index: index, completion: completion)
-        }
-    }
-
-    private func queueStateMutation(_ session: FileSession, mutation: @escaping (inout ViewState) -> Void) {
-        onMain {
-            var state = session.viewState
-            mutation(&state)
-            session.updateViewState(state)
-        }
-    }
-
     func testFetchBurstUnderRapidViewStateChurn_sensorTelemetry() throws {
-        let url = try ensureFileExists(sensorTelemetryPath)
+        let url = try requireFixture(at: TestFixtures.sensorTelemetryCsv)
         let session = try FileSession(filePath: url)
-        try waitForLoadFull(session)
+        try loadSessionFully(session)
 
         var fetchedColumns: [ColumnDescriptor] = []
         onMain { fetchedColumns = session.columns }
@@ -100,9 +51,9 @@ final class FileSessionCrashRegressionTests: XCTestCase {
     }
 
     func testScrollLikeFetchStress_cbCompanies() throws {
-        let url = try ensureFileExists(cbCompaniesPath)
+        let url = try requireFixture(at: TestFixtures.cbCompaniesCsv)
         let session = try FileSession(filePath: url)
-        try waitForLoadFull(session)
+        try loadSessionFully(session)
 
         let fetchCount = 120
         let done = expectation(description: "scroll stress fetches complete")
@@ -133,9 +84,9 @@ final class FileSessionCrashRegressionTests: XCTestCase {
     }
 
     func testSummarySessionCreateDropDuringActiveFetches_cbCompanies() throws {
-        let url = try ensureFileExists(cbCompaniesPath)
+        let url = try requireFixture(at: TestFixtures.cbCompaniesCsv)
         let session = try FileSession(filePath: url)
-        try waitForLoadFull(session)
+        try loadSessionFully(session)
 
         var columns: [ColumnDescriptor] = []
         onMain { columns = session.columns.filter { $0.name != "_gridka_rowid" } }

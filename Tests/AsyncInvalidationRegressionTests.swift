@@ -12,70 +12,15 @@ import XCTest
 ///   6. In-flight fetch request bounding and fetchingPages bookkeeping
 final class AsyncInvalidationRegressionTests: XCTestCase {
 
-    // MARK: - Test Fixtures
-
-    /// ~211K row CSV with numeric + categorical columns; always present in repo
-    private let largePath = "/Users/andrei/Developer/Swift/Gridka/Tests/large.csv"
-    /// ~1.5K row semicolon-delimited CSV
-    private let forexPath = "/Users/andrei/Developer/Swift/Gridka/Tests/12data_forex.csv"
-
-    // MARK: - Helpers
-
-    private func ensureFileExists(_ path: String) throws -> URL {
-        guard FileManager.default.fileExists(atPath: path) else {
-            throw XCTSkip("Missing test fixture: \(path)")
-        }
-        return URL(fileURLWithPath: path)
-    }
-
-    private func onMain(_ block: @escaping () -> Void) {
-        if Thread.isMainThread {
-            block()
-        } else {
-            DispatchQueue.main.async(execute: block)
-        }
-    }
-
-    private func waitForLoadFull(_ session: FileSession, timeout: TimeInterval = 180) throws {
-        let done = expectation(description: "loadFull")
-        var loadError: Error?
-        onMain {
-            session.loadFull(progress: { _ in }) { result in
-                if case .failure(let err) = result {
-                    loadError = err
-                }
-                done.fulfill()
-            }
-        }
-        wait(for: [done], timeout: timeout)
-        if let loadError {
-            throw loadError
-        }
-    }
-
-    private func queueFetch(_ session: FileSession, index: Int, completion: @escaping (Result<RowCache.Page, Error>) -> Void) {
-        onMain {
-            session.fetchPage(index: index, completion: completion)
-        }
-    }
-
-    private func queueStateMutation(_ session: FileSession, mutation: @escaping (inout ViewState) -> Void) {
-        onMain {
-            var state = session.viewState
-            mutation(&state)
-            session.updateViewState(state)
-        }
-    }
-
     // MARK: - 1. Stale Fetch Result Discard After Rapid ViewState Changes
 
     /// AC-1: Verify that rapid filter changes interleaved with fetch requests
     /// never leave stale rows in the cache. After all fetches settle, only the
     /// latest filter's data should be cached.
     func testStaleFetchDiscardedAfterRapidFilterChanges() throws {
-        let url = try ensureFileExists(largePath)
+        let url = try requireFixture(at: TestFixtures.largeCsv)
         let session = try FileSession(filePath: url)
-        try waitForLoadFull(session)
+        try loadSessionFully(session)
 
         var columns: [ColumnDescriptor] = []
         onMain { columns = session.columns.filter { $0.name != "_gridka_rowid" } }
@@ -115,9 +60,9 @@ final class AsyncInvalidationRegressionTests: XCTestCase {
     /// AC-1: Verify that rapid sort direction toggles cause stale fetches to be
     /// discarded, and the final cache is coherent with the last applied sort.
     func testStaleFetchDiscardedAfterRapidSortToggling() throws {
-        let url = try ensureFileExists(largePath)
+        let url = try requireFixture(at: TestFixtures.largeCsv)
         let session = try FileSession(filePath: url)
-        try waitForLoadFull(session)
+        try loadSessionFully(session)
 
         var columns: [ColumnDescriptor] = []
         onMain { columns = session.columns.filter { $0.name != "_gridka_rowid" } }
@@ -160,9 +105,9 @@ final class AsyncInvalidationRegressionTests: XCTestCase {
     /// AC-2: After a viewState change invalidates the cache, subsequent fetch
     /// completions from the old generation must NOT insert pages into the cache.
     func testRowCacheNotMutatedByObsoleteFetchResults() throws {
-        let url = try ensureFileExists(largePath)
+        let url = try requireFixture(at: TestFixtures.largeCsv)
         let session = try FileSession(filePath: url)
-        try waitForLoadFull(session)
+        try loadSessionFully(session)
 
         // Step 1: Fetch page 0 to populate cache
         let fetchDone = expectation(description: "initial fetch")
@@ -205,9 +150,9 @@ final class AsyncInvalidationRegressionTests: XCTestCase {
     /// AC-3: After adding a filter, totalFilteredRows must be updated deterministically
     /// via completion callback, not via timing-based delay.
     func testDeterministicFilteredRowCountAfterFilterAdd() throws {
-        let url = try ensureFileExists(largePath)
+        let url = try requireFixture(at: TestFixtures.largeCsv)
         let session = try FileSession(filePath: url)
-        try waitForLoadFull(session)
+        try loadSessionFully(session)
 
         var initialTotal = 0
         onMain { initialTotal = session.viewState.totalFilteredRows }
@@ -231,9 +176,9 @@ final class AsyncInvalidationRegressionTests: XCTestCase {
 
     /// AC-3: After removing a filter, totalFilteredRows must return to the original value.
     func testDeterministicFilteredRowCountAfterFilterRemove() throws {
-        let url = try ensureFileExists(largePath)
+        let url = try requireFixture(at: TestFixtures.largeCsv)
         let session = try FileSession(filePath: url)
-        try waitForLoadFull(session)
+        try loadSessionFully(session)
 
         var originalTotal = 0
         onMain { originalTotal = session.viewState.totalFilteredRows }
@@ -264,9 +209,9 @@ final class AsyncInvalidationRegressionTests: XCTestCase {
     /// AC-3: Multiple rapid filter changes should result in a final count matching
     /// the last filter applied, not an intermediate value.
     func testDeterministicCountAfterRapidFilterChanges() throws {
-        let url = try ensureFileExists(largePath)
+        let url = try requireFixture(at: TestFixtures.largeCsv)
         let session = try FileSession(filePath: url)
-        try waitForLoadFull(session)
+        try loadSessionFully(session)
 
         let countries = ["Italy", "Poland", "Germany", "France"]
         let finalCountry = "Italy"
@@ -299,9 +244,9 @@ final class AsyncInvalidationRegressionTests: XCTestCase {
 
     /// AC-3: Sort changes should NOT trigger a count requery (sort doesn't change row count).
     func testSortChangeDoesNotRequeryCount() throws {
-        let url = try ensureFileExists(largePath)
+        let url = try requireFixture(at: TestFixtures.largeCsv)
         let session = try FileSession(filePath: url)
-        try waitForLoadFull(session)
+        try loadSessionFully(session)
 
         var totalBefore = 0
         onMain { totalBefore = session.viewState.totalFilteredRows }
@@ -323,9 +268,9 @@ final class AsyncInvalidationRegressionTests: XCTestCase {
 
     /// AC-3: Search term changes must update totalFilteredRows deterministically.
     func testDeterministicCountAfterSearchTermChange() throws {
-        let url = try ensureFileExists(largePath)
+        let url = try requireFixture(at: TestFixtures.largeCsv)
         let session = try FileSession(filePath: url)
-        try waitForLoadFull(session)
+        try loadSessionFully(session)
 
         var originalTotal = 0
         onMain { originalTotal = session.viewState.totalFilteredRows }
@@ -417,11 +362,11 @@ final class AsyncInvalidationRegressionTests: XCTestCase {
     /// AC-5: Repeated open/close cycle with sparklines — verifies summary lifecycle
     /// doesn't crash when sessions are rapidly created and destroyed with summaries.
     func testRepeatedSessionCreateDestroySummaryLifecycle() throws {
-        let url = try ensureFileExists(forexPath)
+        let url = try requireFixture(at: TestFixtures.forexCsv)
 
         for _ in 0..<5 {
             let session = try FileSession(filePath: url)
-            try waitForLoadFull(session)
+            try loadSessionFully(session)
 
             // Compute summaries
             let summaryDone = expectation(description: "summaries computed")
@@ -448,9 +393,9 @@ final class AsyncInvalidationRegressionTests: XCTestCase {
     /// AC-5: Invalidate summaries while computation is in-flight — stale results
     /// should be discarded, not stored.
     func testSummaryInvalidationDuringComputation() throws {
-        let url = try ensureFileExists(largePath)
+        let url = try requireFixture(at: TestFixtures.largeCsv)
         let session = try FileSession(filePath: url)
-        try waitForLoadFull(session)
+        try loadSessionFully(session)
 
         // Start summary computation
         let computeDone = expectation(description: "compute settles")
@@ -490,9 +435,9 @@ final class AsyncInvalidationRegressionTests: XCTestCase {
     /// AC-6: Rapid horizontal/vertical scroll simulation with concurrent page fetches.
     /// Verifies no crash in the duckdb_query path under concurrent serial queue load.
     func testScrollStressRapidPageFetchesNoCrash() throws {
-        let url = try ensureFileExists(largePath)
+        let url = try requireFixture(at: TestFixtures.largeCsv)
         let session = try FileSession(filePath: url)
-        try waitForLoadFull(session)
+        try loadSessionFully(session)
 
         let fetchCount = 100
         let done = expectation(description: "scroll stress fetches")
@@ -532,9 +477,9 @@ final class AsyncInvalidationRegressionTests: XCTestCase {
     /// AC-6: Concurrent page fetches with interleaved sort/filter changes.
     /// Simulates a user scrolling while also sorting/filtering.
     func testScrollWithConcurrentViewStateChanges() throws {
-        let url = try ensureFileExists(largePath)
+        let url = try requireFixture(at: TestFixtures.largeCsv)
         let session = try FileSession(filePath: url)
-        try waitForLoadFull(session)
+        try loadSessionFully(session)
 
         var columns: [ColumnDescriptor] = []
         onMain { columns = session.columns.filter { $0.name != "_gridka_rowid" } }
@@ -584,9 +529,9 @@ final class AsyncInvalidationRegressionTests: XCTestCase {
     /// their fetchingPages bookkeeping. Test this by verifying all completion blocks
     /// are called even under stale generation conditions.
     func testFetchCompletionAlwaysFires() throws {
-        let url = try ensureFileExists(largePath)
+        let url = try requireFixture(at: TestFixtures.largeCsv)
         let session = try FileSession(filePath: url)
-        try waitForLoadFull(session)
+        try loadSessionFully(session)
 
         let fetchCount = 40
         let done = expectation(description: "all completions fire")
@@ -619,9 +564,9 @@ final class AsyncInvalidationRegressionTests: XCTestCase {
 
     /// AC-7: Verify that error completions also fire (e.g., when querying beyond bounds).
     func testFetchCompletionFiresForOutOfBoundsPages() throws {
-        let url = try ensureFileExists(forexPath)
+        let url = try requireFixture(at: TestFixtures.forexCsv)
         let session = try FileSession(filePath: url)
-        try waitForLoadFull(session)
+        try loadSessionFully(session)
 
         // forex has ~1460 rows = 3 pages. Fetch well beyond that.
         let done = expectation(description: "out of bounds fetch")
@@ -692,9 +637,9 @@ final class AsyncInvalidationRegressionTests: XCTestCase {
     /// Integration test covering the full cycle: load → filter → verify count → clear filter
     /// → verify count restored. Ensures all async paths are deterministic end-to-end.
     func testFullFilterLifecycleDeterministic() throws {
-        let url = try ensureFileExists(forexPath)
+        let url = try requireFixture(at: TestFixtures.forexCsv)
         let session = try FileSession(filePath: url)
-        try waitForLoadFull(session)
+        try loadSessionFully(session)
 
         var totalRows = 0
         onMain { totalRows = session.viewState.totalFilteredRows }

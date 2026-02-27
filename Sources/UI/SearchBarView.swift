@@ -97,6 +97,8 @@ final class SearchBarView: NSView {
     private func setup() {
         // Frame is managed by the parent container, not Auto Layout.
         // Internal subviews use Auto Layout within this view's bounds.
+        setAccessibilityIdentifier("searchBar")
+        searchField.setAccessibilityIdentifier("searchField")
         searchField.delegate = self
         previousButton.target = self
         previousButton.action = #selector(previousClicked)
