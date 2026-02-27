@@ -165,7 +165,8 @@ final class FileSession {
 
     /// Thread-safe increment-and-return for summary counter.
     /// Returns a unique counter value safe for use as a temp table suffix.
-    private static func nextSummaryCounter() -> Int {
+    /// Internal (not private) so @testable import can exercise concurrent access (US-010).
+    static func nextSummaryCounter() -> Int {
         os_unfair_lock_lock(&_summaryCounterLock)
         _summaryCounter += 1
         let val = _summaryCounter

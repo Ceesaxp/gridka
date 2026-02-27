@@ -3,66 +3,47 @@ import XCTest
 
 final class SummaryCounterTests: XCTestCase {
 
-    /// Stress test: concurrent `createSummarySession` calls must all produce unique temp table names.
-    /// Validates that the static summaryCounter is properly synchronized (US-010).
-    func testConcurrentSummarySessionCreationProducesUniqueNames() throws {
-        let url = try requireFixture(at: TestFixtures.cbCompaniesCsv)
-        let session = try FileSession(filePath: url)
-        try loadSessionFully(session)
+    /// True concurrency stress test: hammer nextSummaryCounter() from many threads
+    /// simultaneously using DispatchQueue.concurrentPerform. Every returned value
+    /// must be unique — a duplicate proves the lock is broken.
+    func testNextSummaryCounterUniquenessUnderConcurrentAccess() {
+        let iterations = 1000
+        let values = UnsafeMutableBufferPointer<Int>.allocate(capacity: iterations)
+        values.initialize(repeating: 0)
+        defer { values.deallocate() }
 
-        var columns: [ColumnDescriptor] = []
-        onMain { columns = session.columns.filter { $0.name != "_gridka_rowid" } }
-        guard !columns.isEmpty else {
-            XCTFail("No columns loaded")
-            return
+        // concurrentPerform dispatches iterations across all available cores
+        DispatchQueue.concurrentPerform(iterations: iterations) { i in
+            values[i] = FileSession.nextSummaryCounter()
         }
 
-        let definition = GroupByDefinition(
-            groupByColumns: [columns[0].name],
-            aggregations: [AggregationEntry(columnName: "*", function: .count)]
-        )
+        let collected = Array(values)
+        let uniqueValues = Set(collected)
+        XCTAssertEqual(uniqueValues.count, iterations,
+                       "All \(iterations) counter values must be unique; got \(uniqueValues.count) unique out of \(iterations)")
+    }
 
-        let concurrentCount = 20
-        let done = expectation(description: "all summary sessions created")
-        done.expectedFulfillmentCount = concurrentCount
+    /// Verify that concurrent nextSummaryCounter() calls never return zero
+    /// (which would indicate reading before the first increment completes).
+    func testNextSummaryCounterNeverReturnsZero() {
+        let iterations = 500
+        let values = UnsafeMutableBufferPointer<Int>.allocate(capacity: iterations)
+        values.initialize(repeating: 0)
+        defer { values.deallocate() }
 
-        var createdSessions: [FileSession] = []
-        let lock = NSLock()
-
-        for _ in 0..<concurrentCount {
-            onMain {
-                FileSession.createSummarySession(from: session, definition: definition) { result in
-                    if case .success(let s) = result {
-                        lock.lock()
-                        createdSessions.append(s)
-                        lock.unlock()
-                    }
-                    done.fulfill()
-                }
-            }
+        DispatchQueue.concurrentPerform(iterations: iterations) { i in
+            values[i] = FileSession.nextSummaryCounter()
         }
 
-        wait(for: [done], timeout: 60)
-
-        // All sessions should have been created successfully
-        XCTAssertEqual(createdSessions.count, concurrentCount,
-                       "All \(concurrentCount) summary sessions should succeed")
-
-        // Every summary table name must be unique
-        let names = createdSessions.compactMap { $0.summaryTableName }
-        let uniqueNames = Set(names)
-        XCTAssertEqual(names.count, uniqueNames.count,
-                       "All summary table names must be unique, got duplicates: \(names)")
-
-        // Clean up temp tables
-        for s in createdSessions {
-            onMain { s.dropSummaryTable() }
+        for i in 0..<iterations {
+            XCTAssertGreaterThan(values[i], 0, "Counter value at index \(i) must be > 0")
         }
     }
 
-    /// Verify that summary counter values are strictly monotonically increasing
-    /// even when sessions are created from multiple dispatch queues.
-    func testSummaryCounterMonotonicity() throws {
+    /// End-to-end integration: createSummarySession produces sessions with unique
+    /// table names. Calls are serialized on main (matching real app usage), so this
+    /// tests the naming pipeline rather than lock contention.
+    func testSummarySessionCreationProducesUniqueNames() throws {
         let url = try requireFixture(at: TestFixtures.cbCompaniesCsv)
         let session = try FileSession(filePath: url)
         try loadSessionFully(session)
@@ -103,14 +84,10 @@ final class SummaryCounterTests: XCTestCase {
 
         XCTAssertEqual(createdSessions.count, count)
 
-        // Extract numeric suffixes and verify all are unique
         let names = createdSessions.compactMap { $0.summaryTableName }
-        let suffixes = names.compactMap { name -> Int? in
-            guard name.hasPrefix("summary_") else { return nil }
-            return Int(name.dropFirst("summary_".count))
-        }
-        XCTAssertEqual(suffixes.count, count, "All names should have numeric suffixes")
-        XCTAssertEqual(Set(suffixes).count, count, "All numeric suffixes must be unique")
+        let uniqueNames = Set(names)
+        XCTAssertEqual(names.count, uniqueNames.count,
+                       "All summary table names must be unique, got: \(names)")
 
         // Clean up
         for s in createdSessions {
