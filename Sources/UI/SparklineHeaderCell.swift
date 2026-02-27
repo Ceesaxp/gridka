@@ -33,6 +33,23 @@ final class SparklineHeaderCell: NSTableHeaderCell {
         _distributionSnapshot = nil
     }
 
+    /// NSCell uses `NSCopyObject()` (bitwise copy) which does NOT properly retain
+    /// Swift stored properties that contain reference-counted types (String, Array
+    /// inside ColumnSummary/Distribution). The bitwise-copied pointers have wrong
+    /// reference counts, causing use-after-free when the copy is deallocated.
+    ///
+    /// Fix: temporarily nil out Swift properties before the bitwise copy, then restore.
+    /// The copy gets nil values (safe to dealloc), the original is restored.
+    override func copy(with zone: NSZone? = nil) -> Any {
+        let savedSummary = columnSummary
+        columnSummary = nil          // didSet also nils _distributionSnapshot
+
+        let copy = super.copy(with: zone)
+
+        columnSummary = savedSummary // didSet restores _distributionSnapshot
+        return copy
+    }
+
     /// Height reserved for the sparkline area below the text.
     static let sparklineHeight: CGFloat = 16
 

@@ -110,6 +110,12 @@ final class TableViewController: NSViewController {
     /// to discard stale onSummariesComputed callbacks that arrive after a column reconfigure (US-103).
     private var columnConfigGeneration: Int = 0
 
+    /// Tracks the previous sparkline setting to detect transitions in settingsDidChange.
+    private var sparklinesWereEnabled: Bool = SettingsManager.shared.showSparklines
+
+    /// Standard header height when sparklines are disabled.
+    private static let standardHeaderHeight: CGFloat = 22
+
     /// Row number gutter view.
     private var rowNumberView: RowNumberView?
     /// Whether row numbers are visible.
@@ -173,6 +179,7 @@ final class TableViewController: NSViewController {
         // Custom header view for double-click auto-fit
         let customHeader = AutoFitTableHeaderView(tableViewController: self)
         tableView.headerView = customHeader
+        updateHeaderHeight()
 
         // Right-click menu for column headers
         let headerMenu = NSMenu()
@@ -316,6 +323,20 @@ final class TableViewController: NSViewController {
     @objc private func settingsDidChange(_ notification: Notification) {
         updateFormattersFromSettings()
         reloadVisibleRows()
+
+        let sparklinesEnabled = SettingsManager.shared.showSparklines
+        if sparklinesEnabled != sparklinesWereEnabled {
+            sparklinesWereEnabled = sparklinesEnabled
+            if sparklinesEnabled {
+                updateHeaderHeight()
+                fileSession?.computeColumnSummaries()
+            } else {
+                for col in tableView.tableColumns {
+                    (col.headerCell as? SparklineHeaderCell)?.clearSummary()
+                }
+                updateHeaderHeight()
+            }
+        }
     }
 
     private func updateFormattersFromSettings() {
@@ -335,6 +356,15 @@ final class TableViewController: NSViewController {
         }
 
         dateFormatter.dateFormat = settings.dateFormat.rawValue
+    }
+
+    private func updateHeaderHeight() {
+        let height: CGFloat = SettingsManager.shared.showSparklines
+            ? SparklineHeaderCell.totalHeaderHeight
+            : Self.standardHeaderHeight
+        tableView.headerView?.frame.size.height = height
+        tableView.tile()
+        tableView.headerView?.needsDisplay = true
     }
 
     override func viewDidLayout() {
@@ -359,6 +389,13 @@ final class TableViewController: NSViewController {
     func tearDown() {
         NotificationCenter.default.removeObserver(self)
         cancelEdit()
+
+        // Clear sparkline summaries from all header cells before the table view
+        // is released — prevents dangling ColumnSummary pointers during dealloc.
+        for col in tableView.tableColumns {
+            (col.headerCell as? SparklineHeaderCell)?.clearSummary()
+        }
+
         tableView.dataSource = nil
         tableView.delegate = nil
         tableView.target = nil
@@ -531,6 +568,7 @@ final class TableViewController: NSViewController {
     /// and aborts if it changed (meaning configureColumns was called during iteration,
     /// which would have cleared and replaced all header cells). (US-103)
     func updateSparklines() {
+        guard SettingsManager.shared.showSparklines else { return }
         guard let session = fileSession else { return }
         let generation = columnConfigGeneration
         for tableColumn in tableView.tableColumns {
@@ -1485,8 +1523,9 @@ final class TableViewController: NSViewController {
         let sparklineCell = SparklineHeaderCell()
         column.headerCell = sparklineCell
 
-        // Apply column summary if available
-        if let session = fileSession,
+        // Apply column summary if available and sparklines are enabled
+        if SettingsManager.shared.showSparklines,
+           let session = fileSession,
            let summary = session.columnSummaries[descriptor.name] {
             sparklineCell.columnSummary = summary
         }

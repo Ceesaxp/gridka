@@ -640,9 +640,13 @@ final class FileSession {
 
         queryQueue.async { [weak self] in
             do {
-                try self?.engine.execute(sql)
+                guard let self = self else {
+                    DispatchQueue.main.async { completion(.failure(GridkaError.queryFailed("Session deallocated"))) }
+                    return
+                }
+                try self.engine.execute(sql)
                 DispatchQueue.main.async {
-                    self?.isModified = false
+                    self.isModified = false
                     completion(.success(()))
                 }
             } catch {
@@ -674,10 +678,14 @@ final class FileSession {
 
             queryQueue.async { [weak self] in
                 do {
-                    try self?.engine.execute(sql)
+                    guard let self = self else {
+                        DispatchQueue.main.async { completion(.failure(GridkaError.queryFailed("Session deallocated"))) }
+                        return
+                    }
+                    try self.engine.execute(sql)
                     DispatchQueue.main.async {
-                        self?.filePath = url
-                        self?.isModified = false
+                        self.filePath = url
+                        self.isModified = false
                         completion(.success(()))
                     }
                 } catch {
@@ -791,7 +799,11 @@ final class FileSession {
 
         queryQueue.async { [weak self] in
             do {
-                try self?.engine.execute(sql)
+                guard let self = self else {
+                    DispatchQueue.main.async { completion(.failure(GridkaError.queryFailed("Session deallocated"))) }
+                    return
+                }
+                try self.engine.execute(sql)
                 DispatchQueue.main.async {
                     completion(.success(()))
                 }

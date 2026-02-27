@@ -631,7 +631,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                             self.rebalanceMemoryLimits()
 
                             // Compute column summaries in background for sparklines (US-014)
-                            session.computeColumnSummaries()
+                            if SettingsManager.shared.showSparklines {
+                                session.computeColumnSummaries()
+                            }
                         case .failure(let error):
                             statusBar?.updateProgress(1.0)
                             self.showError(error, context: "loading full file")
@@ -984,7 +986,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 tvc.fileSession = session
                 tvc.configureColumns(session.columns)
                 tvc.autoFitAllColumns()
-                session.computeColumnSummaries()
+                if SettingsManager.shared.showSparklines {
+                    session.computeColumnSummaries()
+                }
             case .failure(let error):
                 tvc.statusBar.updateProgress(1.0)
                 self.showError(error, context: "reloading file")
@@ -1045,7 +1049,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 tvc.fileSession = session
                 tvc.configureColumns(session.columns)
                 tvc.autoFitAllColumns()
-                session.computeColumnSummaries()
+                if SettingsManager.shared.showSparklines {
+                    session.computeColumnSummaries()
+                }
             case .failure(let error):
                 tvc.statusBar.updateProgress(1.0)
                 self.showError(error, context: "reloading with delimiter")
@@ -1100,7 +1106,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 tvc.fileSession = session
                 tvc.configureColumns(session.columns)
                 tvc.autoFitAllColumns()
-                session.computeColumnSummaries()
+                if SettingsManager.shared.showSparklines {
+                    session.computeColumnSummaries()
+                }
             case .failure(let error):
                 tvc.statusBar.updateProgress(1.0)
                 self.showError(error, context: "reloading with encoding \(encodingName)")
@@ -1942,6 +1950,7 @@ extension AppDelegate: NSWindowDelegate {
                 session.dropSummaryTable()
             }
             tab.tableViewController?.tearDown()
+            tab.fileSession?.onSummariesComputed = nil
             tab.fileSession?.onModifiedChanged = nil
         }
 
