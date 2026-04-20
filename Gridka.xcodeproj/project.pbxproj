@@ -636,7 +636,7 @@
 				LIBRARY_SEARCH_PATHS = (
 					"$(PROJECT_DIR)/Libraries",
 				);
-				MARKETING_VERSION = 1.0.0;
+				MARKETING_VERSION = 1.2.1;
 				OTHER_LDFLAGS = (
 					"-lduckdb",
 					"-lc++",
@@ -761,7 +761,7 @@
 				LIBRARY_SEARCH_PATHS = (
 					"$(PROJECT_DIR)/Libraries",
 				);
-				MARKETING_VERSION = 1.0.0;
+				MARKETING_VERSION = 1.2.1;
 				OTHER_LDFLAGS = (
 					"-lduckdb",
 					"-lc++",
@@ -784,7 +784,7 @@
 					"@executable_path/../Frameworks",
 					"@executable_path/../../../../Frameworks",
 				);
-				MARKETING_VERSION = 1.0.0;
+				MARKETING_VERSION = 1.2.1;
 				PRODUCT_BUNDLE_IDENTIFIER = org.ceesaxp.gridka.app.quicklook;
 				PRODUCT_NAME = GridkaQuickLook;
 				SDKROOT = macosx;
@@ -887,7 +887,7 @@
 					"@executable_path/../Frameworks",
 					"@executable_path/../../../../Frameworks",
 				);
-				MARKETING_VERSION = 1.0.0;
+				MARKETING_VERSION = 1.2.1;
 				PRODUCT_BUNDLE_IDENTIFIER = org.ceesaxp.gridka.app.quicklook;
 				PRODUCT_NAME = GridkaQuickLook;
 				SDKROOT = macosx;
