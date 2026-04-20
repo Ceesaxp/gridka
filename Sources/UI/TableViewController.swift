@@ -202,7 +202,7 @@ final class TableViewController: NSViewController {
         tableView.action = #selector(tableViewClicked(_:))
         tableView.doubleAction = #selector(tableViewDoubleClicked(_:))
 
-        scrollView = NSScrollView()
+        scrollView = GutterScrollView()
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = true
@@ -388,6 +388,7 @@ final class TableViewController: NSViewController {
                 }
             }
         }
+        repositionRowNumberView()
     }
 
     /// Disconnects all delegate/dataSource/target pointers so the view hierarchy
@@ -729,28 +730,36 @@ final class TableViewController: NSViewController {
 
     private func showRowNumbers() {
         let gutterWidth = TableViewController.rowNumberGutterWidth
-        scrollView.contentInsets.left = gutterWidth
+        let gutterScrollView = scrollView as! GutterScrollView
+        gutterScrollView.gutterWidth = gutterWidth
 
-        // Position below the header, aligned with the clip view
-        let clipFrame = scrollView.contentView.frame
-        let rnView = RowNumberView(frame: NSRect(
-            x: 0,
-            y: clipFrame.origin.y,
-            width: gutterWidth,
-            height: clipFrame.height
-        ))
-        rnView.autoresizingMask = [.height]
+        let rnView = RowNumberView(frame: .zero)
         rnView.tableView = tableView
         rnView.onRowClicked = { [weak self] row in
             self?.tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
         }
         scrollView.addSubview(rnView)
         rowNumberView = rnView
+        repositionRowNumberView()
         rnView.updateVisibleRows()
     }
 
+    /// Repositions the row number gutter to cover the content area of the scroll view
+    /// (below the header). Called after any layout change (toolbar toggle, header resize, etc.).
+    private func repositionRowNumberView() {
+        guard let rnView = rowNumberView else { return }
+        let clipFrame = scrollView.contentView.frame
+        let gutterWidth = TableViewController.rowNumberGutterWidth
+        rnView.frame = NSRect(
+            x: clipFrame.origin.x - gutterWidth,
+            y: clipFrame.origin.y,
+            width: gutterWidth,
+            height: clipFrame.height
+        )
+    }
+
     private func hideRowNumbers() {
-        scrollView.contentInsets.left = 0
+        (scrollView as! GutterScrollView).gutterWidth = 0
         rowNumberView?.removeFromSuperview()
         rowNumberView = nil
     }
@@ -2394,6 +2403,41 @@ private extension NSImage {
     }
 }
 
+
+// MARK: - GutterScrollView
+
+/// NSScrollView subclass that reserves space on the left for a row-number gutter.
+/// Overrides `tile()` so that both the header clip view and content clip view
+/// are offset by `gutterWidth`, preventing the gutter from overlapping column
+/// headers or table content regardless of toolbar/layout changes.
+final class GutterScrollView: NSScrollView {
+    var gutterWidth: CGFloat = 0 {
+        didSet { tile() }
+    }
+
+    override func tile() {
+        super.tile()
+        guard gutterWidth > 0 else { return }
+
+        // Offset the content clip view (holds the table rows)
+        var clipFrame = contentView.frame
+        clipFrame.origin.x = gutterWidth
+        clipFrame.size.width = bounds.width - gutterWidth
+        contentView.frame = clipFrame
+
+        // Offset the header clip view (holds the NSTableHeaderView).
+        // Identify it by checking for an NSTableHeaderView child.
+        for subview in subviews where subview !== contentView {
+            guard let clipView = subview as? NSClipView,
+                  clipView.documentView is NSTableHeaderView else { continue }
+            var headerFrame = clipView.frame
+            headerFrame.origin.x = gutterWidth
+            headerFrame.size.width = bounds.width - gutterWidth
+            clipView.frame = headerFrame
+            break
+        }
+    }
+}
 
 // MARK: - RowNumberView
 
