@@ -197,6 +197,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         let openItem = NSMenuItem(title: "Open…", action: #selector(openDocument(_:)), keyEquivalent: "o")
         openItem.target = self
         fileMenu.addItem(openItem)
+
+        let recentMenuItem = NSMenuItem(title: "Open Recent", action: nil, keyEquivalent: "")
+        let recentMenu = NSMenu(title: "Open Recent")
+        recentMenu.addItem(NSMenuItem(title: "Clear Menu", action: #selector(NSDocumentController.clearRecentDocuments(_:)), keyEquivalent: ""))
+        recentMenuItem.submenu = recentMenu
+        fileMenu.addItem(recentMenuItem)
+
         fileMenu.addItem(NSMenuItem.separator())
         let saveItem = NSMenuItem(title: "Save", action: #selector(saveDocument(_:)), keyEquivalent: "s")
         saveItem.target = self
@@ -587,6 +594,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             tab.fileSession = session
             win.title = url.lastPathComponent
             win.subtitle = url.deletingLastPathComponent().path
+
+            NSDocumentController.shared.noteNewRecentDocumentURL(url)
 
             // Track document-edited state via window dirty dot
             session.onModifiedChanged = { [weak win] modified in
