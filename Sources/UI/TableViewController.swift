@@ -1035,6 +1035,13 @@ final class TableViewController: NSViewController {
         updateCellHighlight(row: clickedRow, column: clickedCol)
         updateDetailPane()
         statusBar.updateCellLocation(row: clickedRow, columnName: selectedColumnName)
+
+        if NSApp.currentEvent?.clickCount == 1,
+           let value = fileSession?.rowCache.value(forRow: clickedRow, columnName: selectedColumnName),
+           case .string(let text) = value,
+           let url = HTTPURLParser.parse(text) {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     @objc private func tableViewDoubleClicked(_ sender: Any?) {
@@ -1699,6 +1706,10 @@ final class TableViewController: NSViewController {
             }
             return NSAttributedString(string: v, attributes: attrs)
         case .string(let v):
+            if HTTPURLParser.parse(v) != nil {
+                attrs[.foregroundColor] = NSColor.linkColor
+                attrs[.underlineStyle] = NSUnderlineStyle.single.rawValue
+            }
             return NSAttributedString(string: v, attributes: attrs)
         }
     }
