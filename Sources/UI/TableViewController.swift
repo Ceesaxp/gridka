@@ -1037,7 +1037,7 @@ final class TableViewController: NSViewController {
         statusBar.updateCellLocation(row: clickedRow, columnName: selectedColumnName)
 
         if let event = NSApp.currentEvent,
-           event.clickCount == 1,
+           GridCellTextField.shouldOpenLink(clickCount: event.clickCount, modifierFlags: event.modifierFlags),
            let cell = tableView.view(atColumn: clickedCol, row: clickedRow, makeIfNecessary: false) as? GridCellTextField,
            let url = cell.linkURL,
            cell.isLink(at: cell.convert(event.locationInWindow, from: nil)) {
@@ -1051,6 +1051,16 @@ final class TableViewController: NSViewController {
 
         guard clickedRow >= 0, clickedCol >= 0, clickedCol < tableView.numberOfColumns else { return }
         guard let session = fileSession, session.isFullyLoaded else { return }
+
+        if let event = NSApp.currentEvent,
+           GridCellTextField.shouldSuppressEditingForLink(
+               clickCount: event.clickCount,
+               modifierFlags: event.modifierFlags
+           ),
+           let cell = tableView.view(atColumn: clickedCol, row: clickedRow, makeIfNecessary: false) as? GridCellTextField,
+           cell.isLink(at: cell.convert(event.locationInWindow, from: nil)) {
+            return
+        }
 
         let columnName = tableView.tableColumns[clickedCol].identifier.rawValue
 
@@ -1854,7 +1864,16 @@ extension TableViewController: NSTableViewDataSource {
 extension TableViewController: NSTableViewDelegate {
 
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
-        return GridTableRowView()
+        if let rowView = tableView.makeView(
+            withIdentifier: GridTableRowView.reuseIdentifier,
+            owner: self
+        ) as? GridTableRowView {
+            return rowView
+        }
+
+        let rowView = GridTableRowView()
+        rowView.identifier = GridTableRowView.reuseIdentifier
+        return rowView
     }
 
     func tableView(_ tableView: NSTableView, didClick tableColumn: NSTableColumn) {
@@ -1929,7 +1948,10 @@ extension TableViewController: NSTableViewDelegate {
             let linkURL: URL?
             if SettingsManager.shared.clickableWebLinks,
                case .string(let text) = value {
-                linkURL = HTTPURLParser.parse(text)
+                linkURL = HTTPURLParser.parse(
+                    text,
+                    allowUserInfo: SettingsManager.shared.allowCredentialedWebLinks
+                )
             } else {
                 linkURL = nil
             }
@@ -1959,6 +1981,8 @@ extension TableViewController: NSTableViewDelegate {
 }
 
 final class GridTableRowView: NSTableRowView {
+    static let reuseIdentifier = NSUserInterfaceItemIdentifier("GridTableRowView")
+
     override var isSelected: Bool {
         didSet {
             guard isSelected != oldValue else { return }
@@ -1988,6 +2012,16 @@ final class GridTableRowView: NSTableRowView {
 }
 
 final class GridCellTextField: NSTextField {
+    private static let linkActivationModifiers: NSEvent.ModifierFlags = [.command, .shift, .option, .control]
+
+    static func shouldOpenLink(clickCount: Int, modifierFlags: NSEvent.ModifierFlags) -> Bool {
+        return clickCount == 1 && modifierFlags.intersection(linkActivationModifiers).isEmpty
+    }
+
+    static func shouldSuppressEditingForLink(clickCount: Int, modifierFlags: NSEvent.ModifierFlags) -> Bool {
+        return clickCount == 2 && modifierFlags.intersection(linkActivationModifiers).isEmpty
+    }
+
     static func linkTextColor(isSelected: Bool, isEmphasized: Bool = true) -> NSColor {
         guard isSelected else { return .linkColor }
         return isEmphasized ? .alternateSelectedControlTextColor : .unemphasizedSelectedTextColor

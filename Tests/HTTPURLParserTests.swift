@@ -16,11 +16,31 @@ final class HTTPURLParserTests: XCTestCase {
         XCTAssertNotNil(HTTPURLParser.parse("https://xn--bcher-kva.example/path"))
     }
 
-    func testAcceptsValidPercentEncodingAndLongURLs() {
+    func testAcceptsValidPercentEncodingAndBoundedURLs() {
         XCTAssertNotNil(HTTPURLParser.parse("https://example.com/a%20path?q=a%2Fb"))
 
-        let longURL = "https://example.com/?q=" + String(repeating: "a", count: 100_000)
-        XCTAssertNotNil(HTTPURLParser.parse(longURL))
+        let prefix = "https://example.com/"
+        let maximumURL = prefix + String(
+            repeating: "a",
+            count: HTTPURLParser.maximumClickableURLLength - prefix.utf8.count
+        )
+        XCTAssertNotNil(HTTPURLParser.parse(maximumURL))
+
+        let oversizedURL = maximumURL + "a"
+        XCTAssertNil(HTTPURLParser.parse(oversizedURL))
+    }
+
+    func testRejectsUserInfoByDefault() {
+        XCTAssertNil(HTTPURLParser.parse("https://user@evil.example/path"))
+        XCTAssertNil(HTTPURLParser.parse("https://user:password@evil.example/path"))
+
+        let deceptiveURL = "https://trusted.example" + String(repeating: "a", count: 1_000) + "@evil.example"
+        XCTAssertNil(HTTPURLParser.parse(deceptiveURL))
+    }
+
+    func testAcceptsUserInfoOnlyWhenExplicitlyAllowed() {
+        XCTAssertNotNil(HTTPURLParser.parse("https://user@evil.example/path", allowUserInfo: true))
+        XCTAssertNotNil(HTTPURLParser.parse("https://user:password@evil.example/path", allowUserInfo: true))
     }
 
     func testRejectsUnsupportedOrRelativeURLs() {
@@ -65,6 +85,22 @@ final class HTTPURLParserTests: XCTestCase {
         field.stringValue = "https://example.com"
 
         XCTAssertFalse(field.isLink(at: NSPoint(x: 5, y: 10)))
+    }
+
+    func testGridCellOnlyOpensUnmodifiedSingleClicks() {
+        XCTAssertTrue(GridCellTextField.shouldOpenLink(clickCount: 1, modifierFlags: []))
+        XCTAssertFalse(GridCellTextField.shouldOpenLink(clickCount: 2, modifierFlags: []))
+        XCTAssertFalse(GridCellTextField.shouldOpenLink(clickCount: 1, modifierFlags: .command))
+        XCTAssertFalse(GridCellTextField.shouldOpenLink(clickCount: 1, modifierFlags: .shift))
+        XCTAssertFalse(GridCellTextField.shouldOpenLink(clickCount: 1, modifierFlags: .option))
+        XCTAssertFalse(GridCellTextField.shouldOpenLink(clickCount: 1, modifierFlags: .control))
+    }
+
+    func testGridCellSuppressesEditingOnlyForUnmodifiedLinkDoubleClicks() {
+        XCTAssertTrue(GridCellTextField.shouldSuppressEditingForLink(clickCount: 2, modifierFlags: []))
+        XCTAssertFalse(GridCellTextField.shouldSuppressEditingForLink(clickCount: 1, modifierFlags: []))
+        XCTAssertFalse(GridCellTextField.shouldSuppressEditingForLink(clickCount: 2, modifierFlags: .command))
+        XCTAssertFalse(GridCellTextField.shouldSuppressEditingForLink(clickCount: 2, modifierFlags: .shift))
     }
 
     func testGridCellUsesLinkColorWhenUnselected() {

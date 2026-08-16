@@ -1,13 +1,17 @@
 import Foundation
 
 enum HTTPURLParser {
-    static func parse(_ value: String) -> URL? {
+    static let maximumClickableURLLength = 8_192
+
+    static func parse(_ value: String, allowUserInfo: Bool = false) -> URL? {
         guard hasHTTPSchemePrefix(value),
+              value.utf8.prefix(maximumClickableURLLength + 1).count <= maximumClickableURLLength,
               let url = URL(string: value, encodingInvalidCharacters: false),
               let scheme = url.scheme?.lowercased(),
               scheme == "http" || scheme == "https",
               let host = url.host,
-              !host.isEmpty else {
+              !host.isEmpty,
+              allowUserInfo || (url.user == nil && url.password == nil) else {
             return nil
         }
 

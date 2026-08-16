@@ -19,10 +19,15 @@ final class SettingsWindowController: NSWindowController {
     private let decimalCommaCheckbox = NSButton(checkboxWithTitle: "Use comma as decimal delimiter (1.234,56)", target: nil, action: nil)
     private let sparklineCheckbox = NSButton(checkboxWithTitle: "Show sparklines in column headers", target: nil, action: nil)
     private let clickableWebLinksCheckbox = NSButton(checkboxWithTitle: "Make web links clickable", target: nil, action: nil)
+    private let allowCredentialedWebLinksCheckbox = NSButton(
+        checkboxWithTitle: "Allow links containing usernames or passwords",
+        target: nil,
+        action: nil
+    )
 
     convenience init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 380, height: 275),
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 310),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -91,6 +96,17 @@ final class SettingsWindowController: NSWindowController {
         clickableWebLinksCheckbox.target = self
         clickableWebLinksCheckbox.action = #selector(clickableWebLinksChanged(_:))
         stack.addArrangedSubview(clickableWebLinksCheckbox)
+
+        let credentialedLinksRow = NSStackView()
+        credentialedLinksRow.orientation = .horizontal
+        credentialedLinksRow.spacing = 8
+        let indentation = NSView()
+        indentation.widthAnchor.constraint(equalToConstant: 18).isActive = true
+        allowCredentialedWebLinksCheckbox.target = self
+        allowCredentialedWebLinksCheckbox.action = #selector(allowCredentialedWebLinksChanged(_:))
+        credentialedLinksRow.addArrangedSubview(indentation)
+        credentialedLinksRow.addArrangedSubview(allowCredentialedWebLinksCheckbox)
+        stack.addArrangedSubview(credentialedLinksRow)
     }
 
     private func loadSettings() {
@@ -103,6 +119,8 @@ final class SettingsWindowController: NSWindowController {
         decimalCommaCheckbox.state = settings.useDecimalComma ? .on : .off
         sparklineCheckbox.state = settings.showSparklines ? .on : .off
         clickableWebLinksCheckbox.state = settings.clickableWebLinks ? .on : .off
+        allowCredentialedWebLinksCheckbox.state = settings.allowCredentialedWebLinks ? .on : .off
+        allowCredentialedWebLinksCheckbox.isEnabled = settings.clickableWebLinks
     }
 
     @objc private func dateFormatChanged(_ sender: NSPopUpButton) {
@@ -129,5 +147,10 @@ final class SettingsWindowController: NSWindowController {
 
     @objc private func clickableWebLinksChanged(_ sender: NSButton) {
         SettingsManager.shared.clickableWebLinks = (sender.state == .on)
+        allowCredentialedWebLinksCheckbox.isEnabled = (sender.state == .on)
+    }
+
+    @objc private func allowCredentialedWebLinksChanged(_ sender: NSButton) {
+        SettingsManager.shared.allowCredentialedWebLinks = (sender.state == .on)
     }
 }

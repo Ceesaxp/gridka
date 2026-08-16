@@ -30,6 +30,7 @@ final class SettingsManager {
         static let decimalComma = "GridkaDecimalComma"
         static let showSparklines = "GridkaShowSparklines"
         static let clickableWebLinks = "GridkaClickableWebLinks"
+        static let allowCredentialedWebLinks = "GridkaAllowCredentialedWebLinks"
         static let analysisToolbarVisible = "GridkaAnalysisToolbarVisible"
         static let profilerSidebarVisible = "GridkaProfilerSidebarVisible"
     }
@@ -103,6 +104,16 @@ final class SettingsManager {
         }
         set {
             UserDefaults.standard.set(newValue, forKey: Keys.clickableWebLinks)
+            notifyChange()
+        }
+    }
+
+    var allowCredentialedWebLinks: Bool {
+        get {
+            return UserDefaults.standard.bool(forKey: Keys.allowCredentialedWebLinks)
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: Keys.allowCredentialedWebLinks)
             notifyChange()
         }
     }
