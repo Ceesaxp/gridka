@@ -66,4 +66,12 @@ final class HTTPURLParserTests: XCTestCase {
 
         XCTAssertFalse(field.isLink(at: NSPoint(x: 5, y: 10)))
     }
+
+    func testGridCellUsesLinkColorWhenUnselected() {
+        XCTAssertEqual(GridCellTextField.linkTextColor(isSelected: false), .linkColor)
+    }
+
+    func testGridCellUsesTableTextColorWhenSelected() {
+        XCTAssertEqual(GridCellTextField.linkTextColor(isSelected: true), .alternateSelectedControlTextColor)
+    }
 }

@@ -56,6 +56,9 @@ final class TableViewController: NSViewController {
     private(set) var selectedRow: Int = -1
     private(set) var selectedColumnName: String = ""
 
+    /// Rows whose cells were last rendered with selected-row styling.
+    private var styledSelectedRows: IndexSet = []
+
     /// Whether the detail pane is visible.
     private var isDetailPaneVisible = true
 
@@ -1685,7 +1688,8 @@ final class TableViewController: NSViewController {
         _ value: DuckDBValue,
         displayType: DisplayType,
         rightAlign: Bool = false,
-        linkURL: URL? = nil
+        linkURL: URL? = nil,
+        isRowSelected: Bool = false
     ) -> NSAttributedString {
         var attrs: [NSAttributedString.Key: Any] = [:]
         if rightAlign {
@@ -1713,7 +1717,7 @@ final class TableViewController: NSViewController {
             return NSAttributedString(string: v, attributes: attrs)
         case .string(let v):
             if linkURL != nil {
-                attrs[.foregroundColor] = NSColor.linkColor
+                attrs[.foregroundColor] = GridCellTextField.linkTextColor(isSelected: isRowSelected)
                 attrs[.underlineStyle] = NSUnderlineStyle.single.rawValue
             }
             return NSAttributedString(string: v, attributes: attrs)
@@ -1852,6 +1856,13 @@ extension TableViewController: NSTableViewDataSource {
 
 extension TableViewController: NSTableViewDelegate {
 
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        let selectedRows = tableView.selectedRowIndexes
+        let changedRows = styledSelectedRows.symmetricDifference(selectedRows)
+        styledSelectedRows = selectedRows
+        reloadRows(changedRows, columns: IndexSet(integersIn: 0..<tableView.numberOfColumns))
+    }
+
     func tableView(_ tableView: NSTableView, didClick tableColumn: NSTableColumn) {
         guard let session = fileSession else { return }
         let columnName = tableColumn.identifier.rawValue
@@ -1932,7 +1943,8 @@ extension TableViewController: NSTableViewDelegate {
                 value,
                 displayType: displayType,
                 rightAlign: isNumeric,
-                linkURL: linkURL
+                linkURL: linkURL,
+                isRowSelected: tableView.selectedRowIndexes.contains(row)
             )
             cell.linkURL = linkURL
         } else {
@@ -1953,6 +1965,10 @@ extension TableViewController: NSTableViewDelegate {
 }
 
 final class GridCellTextField: NSTextField {
+    static func linkTextColor(isSelected: Bool) -> NSColor {
+        return isSelected ? .alternateSelectedControlTextColor : .linkColor
+    }
+
     var linkURL: URL? {
         didSet {
             if linkURL != oldValue {
