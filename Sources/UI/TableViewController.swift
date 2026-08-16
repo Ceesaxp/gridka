@@ -1036,10 +1036,11 @@ final class TableViewController: NSViewController {
         updateDetailPane()
         statusBar.updateCellLocation(row: clickedRow, columnName: selectedColumnName)
 
-        if NSApp.currentEvent?.clickCount == 1,
-           let value = fileSession?.rowCache.value(forRow: clickedRow, columnName: selectedColumnName),
-           case .string(let text) = value,
-           let url = HTTPURLParser.parse(text) {
+        if let event = NSApp.currentEvent,
+           event.clickCount == 1,
+           let cell = tableView.view(atColumn: clickedCol, row: clickedRow, makeIfNecessary: false) as? GridCellTextField,
+           let url = cell.linkURL,
+           cell.isLink(at: cell.convert(event.locationInWindow, from: nil)) {
             NSWorkspace.shared.open(url)
         }
     }
@@ -1680,7 +1681,12 @@ final class TableViewController: NSViewController {
         return style
     }()
 
-    private func formatValue(_ value: DuckDBValue, displayType: DisplayType, rightAlign: Bool = false) -> NSAttributedString {
+    private func formatValue(
+        _ value: DuckDBValue,
+        displayType: DisplayType,
+        rightAlign: Bool = false,
+        linkURL: URL? = nil
+    ) -> NSAttributedString {
         var attrs: [NSAttributedString.Key: Any] = [:]
         if rightAlign {
             attrs[.paragraphStyle] = TableViewController.rightParagraphStyle
@@ -1706,7 +1712,7 @@ final class TableViewController: NSViewController {
             }
             return NSAttributedString(string: v, attributes: attrs)
         case .string(let v):
-            if HTTPURLParser.parse(v) != nil {
+            if linkURL != nil {
                 attrs[.foregroundColor] = NSColor.linkColor
                 attrs[.underlineStyle] = NSUnderlineStyle.single.rawValue
             }
@@ -1891,9 +1897,9 @@ extension TableViewController: NSTableViewDelegate {
         let identifier = tableColumn.identifier
         let columnName = identifier.rawValue
 
-        var cellView = tableView.makeView(withIdentifier: identifier, owner: self) as? NSTextField
+        var cellView = tableView.makeView(withIdentifier: identifier, owner: self) as? GridCellTextField
         if cellView == nil {
-            let textField = NSTextField()
+            let textField = GridCellTextField()
             textField.identifier = identifier
             textField.isBordered = false
             textField.drawsBackground = false
@@ -1915,13 +1921,27 @@ extension TableViewController: NSTableViewDelegate {
         let isNumeric = displayType == .integer || displayType == .float
 
         if let value = value {
-            cell.attributedStringValue = formatValue(value, displayType: displayType, rightAlign: isNumeric)
+            let linkURL: URL?
+            if SettingsManager.shared.clickableWebLinks,
+               case .string(let text) = value {
+                linkURL = HTTPURLParser.parse(text)
+            } else {
+                linkURL = nil
+            }
+            cell.attributedStringValue = formatValue(
+                value,
+                displayType: displayType,
+                rightAlign: isNumeric,
+                linkURL: linkURL
+            )
+            cell.linkURL = linkURL
         } else {
             // Cache miss — show placeholder and request fetch
             cell.attributedStringValue = NSAttributedString(
                 string: "...",
                 attributes: [.foregroundColor: NSColor.tertiaryLabelColor]
             )
+            cell.linkURL = nil
             requestPageFetch(forRow: row)
         }
 
@@ -1929,6 +1949,38 @@ extension TableViewController: NSTableViewDelegate {
         updateEditedDot(on: cell, row: row, columnName: columnName, session: session)
 
         return cell
+    }
+}
+
+final class GridCellTextField: NSTextField {
+    var linkURL: URL? {
+        didSet {
+            if linkURL != oldValue {
+                window?.invalidateCursorRects(for: self)
+            }
+        }
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        guard linkURL != nil else { return }
+
+        let cursorRect = linkTextRect.intersection(visibleRect)
+        if !cursorRect.isEmpty {
+            addCursorRect(cursorRect, cursor: .pointingHand)
+        }
+    }
+
+    func isLink(at point: NSPoint) -> Bool {
+        return linkURL != nil && linkTextRect.contains(point)
+    }
+
+    private var linkTextRect: NSRect {
+        guard let cell else { return .zero }
+
+        var textRect = cell.drawingRect(forBounds: bounds)
+        textRect.size.width = min(ceil(attributedStringValue.size().width), textRect.width)
+        return textRect
     }
 }
 

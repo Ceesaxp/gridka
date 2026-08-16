@@ -29,6 +29,7 @@ final class SettingsManager {
         static let thousandsSeparator = "GridkaThousandsSeparator"
         static let decimalComma = "GridkaDecimalComma"
         static let showSparklines = "GridkaShowSparklines"
+        static let clickableWebLinks = "GridkaClickableWebLinks"
         static let analysisToolbarVisible = "GridkaAnalysisToolbarVisible"
         static let profilerSidebarVisible = "GridkaProfilerSidebarVisible"
     }
@@ -89,6 +90,19 @@ final class SettingsManager {
         }
         set {
             UserDefaults.standard.set(newValue, forKey: Keys.showSparklines)
+            notifyChange()
+        }
+    }
+
+    var clickableWebLinks: Bool {
+        get {
+            if UserDefaults.standard.object(forKey: Keys.clickableWebLinks) == nil {
+                return true
+            }
+            return UserDefaults.standard.bool(forKey: Keys.clickableWebLinks)
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: Keys.clickableWebLinks)
             notifyChange()
         }
     }

@@ -18,10 +18,11 @@ final class SettingsWindowController: NSWindowController {
     private let thousandsSeparatorCheckbox = NSButton(checkboxWithTitle: "Use thousands separator (1,234,567)", target: nil, action: nil)
     private let decimalCommaCheckbox = NSButton(checkboxWithTitle: "Use comma as decimal delimiter (1.234,56)", target: nil, action: nil)
     private let sparklineCheckbox = NSButton(checkboxWithTitle: "Show sparklines in column headers", target: nil, action: nil)
+    private let clickableWebLinksCheckbox = NSButton(checkboxWithTitle: "Make web links clickable", target: nil, action: nil)
 
     convenience init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 380, height: 240),
+            contentRect: NSRect(x: 0, y: 0, width: 380, height: 275),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -86,6 +87,10 @@ final class SettingsWindowController: NSWindowController {
         sparklineCheckbox.target = self
         sparklineCheckbox.action = #selector(sparklineChanged(_:))
         stack.addArrangedSubview(sparklineCheckbox)
+
+        clickableWebLinksCheckbox.target = self
+        clickableWebLinksCheckbox.action = #selector(clickableWebLinksChanged(_:))
+        stack.addArrangedSubview(clickableWebLinksCheckbox)
     }
 
     private func loadSettings() {
@@ -97,6 +102,7 @@ final class SettingsWindowController: NSWindowController {
         thousandsSeparatorCheckbox.state = settings.useThousandsSeparator ? .on : .off
         decimalCommaCheckbox.state = settings.useDecimalComma ? .on : .off
         sparklineCheckbox.state = settings.showSparklines ? .on : .off
+        clickableWebLinksCheckbox.state = settings.clickableWebLinks ? .on : .off
     }
 
     @objc private func dateFormatChanged(_ sender: NSPopUpButton) {
@@ -119,5 +125,9 @@ final class SettingsWindowController: NSWindowController {
 
     @objc private func sparklineChanged(_ sender: NSButton) {
         SettingsManager.shared.showSparklines = (sender.state == .on)
+    }
+
+    @objc private func clickableWebLinksChanged(_ sender: NSButton) {
+        SettingsManager.shared.clickableWebLinks = (sender.state == .on)
     }
 }

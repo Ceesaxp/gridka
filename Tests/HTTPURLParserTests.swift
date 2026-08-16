@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import Gridka
 
@@ -47,5 +48,22 @@ final class HTTPURLParserTests: XCTestCase {
     func testOrdinaryLargeCellUsesNonURLFastPath() {
         let value = String(repeating: "not a URL ", count: 100_000)
         XCTAssertNil(HTTPURLParser.parse(value))
+    }
+
+    func testGridCellLinkHitAreaExcludesTrailingWhitespace() {
+        let field = GridCellTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 20))
+        field.isBordered = false
+        field.stringValue = "https://example.com"
+        field.linkURL = URL(string: field.stringValue)
+
+        XCTAssertTrue(field.isLink(at: NSPoint(x: 5, y: 10)))
+        XCTAssertFalse(field.isLink(at: NSPoint(x: 290, y: 10)))
+    }
+
+    func testGridCellWithoutLinkHasNoLinkHitArea() {
+        let field = GridCellTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 20))
+        field.stringValue = "https://example.com"
+
+        XCTAssertFalse(field.isLink(at: NSPoint(x: 5, y: 10)))
     }
 }
