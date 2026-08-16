@@ -56,9 +56,6 @@ final class TableViewController: NSViewController {
     private(set) var selectedRow: Int = -1
     private(set) var selectedColumnName: String = ""
 
-    /// Rows whose cells were last rendered with selected-row styling.
-    private var styledSelectedRows: IndexSet = []
-
     /// Whether the detail pane is visible.
     private var isDetailPaneVisible = true
 
@@ -1856,11 +1853,8 @@ extension TableViewController: NSTableViewDataSource {
 
 extension TableViewController: NSTableViewDelegate {
 
-    func tableViewSelectionDidChange(_ notification: Notification) {
-        let selectedRows = tableView.selectedRowIndexes
-        let changedRows = styledSelectedRows.symmetricDifference(selectedRows)
-        styledSelectedRows = selectedRows
-        reloadRows(changedRows, columns: IndexSet(integersIn: 0..<tableView.numberOfColumns))
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        return GridTableRowView()
     }
 
     func tableView(_ tableView: NSTableView, didClick tableColumn: NSTableColumn) {
@@ -1964,9 +1958,39 @@ extension TableViewController: NSTableViewDelegate {
     }
 }
 
+final class GridTableRowView: NSTableRowView {
+    override var isSelected: Bool {
+        didSet {
+            guard isSelected != oldValue else { return }
+            updateLinkTextColors()
+        }
+    }
+
+    override var isEmphasized: Bool {
+        didSet {
+            guard isEmphasized != oldValue else { return }
+            updateLinkTextColors()
+        }
+    }
+
+    override func didAddSubview(_ subview: NSView) {
+        super.didAddSubview(subview)
+        if let cell = subview as? GridCellTextField {
+            cell.updateLinkTextColor(isSelected: isSelected, isEmphasized: isEmphasized)
+        }
+    }
+
+    private func updateLinkTextColors() {
+        for case let cell as GridCellTextField in subviews {
+            cell.updateLinkTextColor(isSelected: isSelected, isEmphasized: isEmphasized)
+        }
+    }
+}
+
 final class GridCellTextField: NSTextField {
-    static func linkTextColor(isSelected: Bool) -> NSColor {
-        return isSelected ? .alternateSelectedControlTextColor : .linkColor
+    static func linkTextColor(isSelected: Bool, isEmphasized: Bool = true) -> NSColor {
+        guard isSelected else { return .linkColor }
+        return isEmphasized ? .alternateSelectedControlTextColor : .unemphasizedSelectedTextColor
     }
 
     var linkURL: URL? {
@@ -1975,6 +1999,18 @@ final class GridCellTextField: NSTextField {
                 window?.invalidateCursorRects(for: self)
             }
         }
+    }
+
+    func updateLinkTextColor(isSelected: Bool, isEmphasized: Bool = true) {
+        guard linkURL != nil, attributedStringValue.length > 0 else { return }
+
+        let value = NSMutableAttributedString(attributedString: attributedStringValue)
+        value.addAttribute(
+            .foregroundColor,
+            value: Self.linkTextColor(isSelected: isSelected, isEmphasized: isEmphasized),
+            range: NSRange(location: 0, length: value.length)
+        )
+        attributedStringValue = value
     }
 
     override func resetCursorRects() {

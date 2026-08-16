@@ -74,4 +74,55 @@ final class HTTPURLParserTests: XCTestCase {
     func testGridCellUsesTableTextColorWhenSelected() {
         XCTAssertEqual(GridCellTextField.linkTextColor(isSelected: true), .alternateSelectedControlTextColor)
     }
+
+    func testGridCellUsesUnemphasizedTextColorWhenSelectionIsInactive() {
+        XCTAssertEqual(
+            GridCellTextField.linkTextColor(isSelected: true, isEmphasized: false),
+            .unemphasizedSelectedTextColor
+        )
+    }
+
+    func testGridCellUpdatesLinkColorWithoutReplacingOtherAttributes() {
+        let field = GridCellTextField()
+        field.linkURL = URL(string: "https://example.com")
+        field.attributedStringValue = NSAttributedString(
+            string: "https://example.com",
+            attributes: [.underlineStyle: NSUnderlineStyle.single.rawValue]
+        )
+
+        field.updateLinkTextColor(isSelected: true)
+
+        let attributes = field.attributedStringValue.attributes(at: 0, effectiveRange: nil)
+        XCTAssertEqual(attributes[.foregroundColor] as? NSColor, .alternateSelectedControlTextColor)
+        XCTAssertEqual(attributes[.underlineStyle] as? Int, NSUnderlineStyle.single.rawValue)
+    }
+
+    func testGridRowUpdatesLinkColorDuringSelectionChange() {
+        let row = GridTableRowView()
+        let field = GridCellTextField()
+        field.linkURL = URL(string: "https://example.com")
+        field.attributedStringValue = NSAttributedString(string: "https://example.com")
+        row.addSubview(field)
+        row.isEmphasized = true
+
+        row.isSelected = true
+
+        let color = field.attributedStringValue.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor
+        XCTAssertEqual(color, .alternateSelectedControlTextColor)
+    }
+
+    func testGridRowUpdatesLinkColorWhenSelectionLosesEmphasis() {
+        let row = GridTableRowView()
+        let field = GridCellTextField()
+        field.linkURL = URL(string: "https://example.com")
+        field.attributedStringValue = NSAttributedString(string: "https://example.com")
+        row.addSubview(field)
+        row.isEmphasized = true
+        row.isSelected = true
+
+        row.isEmphasized = false
+
+        let color = field.attributedStringValue.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor
+        XCTAssertEqual(color, .unemphasizedSelectedTextColor)
+    }
 }
