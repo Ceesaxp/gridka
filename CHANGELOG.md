@@ -5,6 +5,22 @@ All notable changes to Gridka will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] - 2026-08-19
+
+### Fixed
+- Cut/Copy/Paste (and Undo/Redo) now work inside a cell being edited — the Edit menu
+  used a hard-targeted "Copy Cell" item for ⌘C and had no Cut/Paste items at all, so
+  the field editor never saw the standard editing commands. ⌘C still copies the
+  selected cell when the grid has focus.
+- Saving no longer fails with "IO Error: Cannot open file .../tmp_<name>.csv:
+  Operation not permitted". DuckDB's `COPY TO` wrote a sibling `tmp_` file and renamed
+  it over the target, which the App Sandbox denies — the app only holds permission for
+  the file the user picked. All exports now pass `USE_TMP_FILE false`. Affected Save,
+  Save As, computed-column export and summary export.
+- Save As encoding/delimiter accessory view no longer gets clipped in the narrower
+  macOS 27 save panel — it now lays out as two flexible rows instead of one fixed
+  476pt-wide row.
+
 ## [1.3.0] - 2026-04-23
 
 ### Added

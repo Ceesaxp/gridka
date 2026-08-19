@@ -29,6 +29,7 @@
 		80A7FD7B1EB4B3F189E41278 /* ComputedColumnPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 148A6DDD81329D4341B12A95 /* ComputedColumnPanelController.swift */; };
 		86E80D6DDFFC6D2ED897F268 /* DuckDBResultBoundsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A9FFA4EA1DC35A80DA3BD2A /* DuckDBResultBoundsTests.swift */; };
 		88717FF3150E57A0F42F2712 /* ColumnSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F0514B553D8369EA17C238D /* ColumnSummary.swift */; };
+		88FC9FAC2B9DFDFC736F0336 /* SaveTmpFileRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29D57AE55F0973A3DAF3E566 /* SaveTmpFileRegressionTests.swift */; };
 		8D2333827090BDCE78058109 /* GridkaTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15FCA2638045DB76E9039F92 /* GridkaTests.swift */; };
 		9126A97436F20DDF826CFA7F /* 12data_forex.csv in Resources */ = {isa = PBXBuildFile; fileRef = B190E556873AFF3CA89009D9 /* 12data_forex.csv */; };
 		9525EB05B0ABB5784FA870D6 /* AnalysisToolbarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA6E7A8C10E86F68CF034F69 /* AnalysisToolbarView.swift */; };
@@ -119,6 +120,7 @@
 		1CECB8E24CB06B3026E6B2AD /* cb-companies.csv */ = {isa = PBXFileReference; path = "cb-companies.csv"; sourceTree = "<group>"; };
 		1E553B133E5373521C491798 /* RenameColumnPopoverController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenameColumnPopoverController.swift; sourceTree = "<group>"; };
 		295CD84B9E7A7445423A459E /* ExpressionInjectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExpressionInjectionTests.swift; sourceTree = "<group>"; };
+		29D57AE55F0973A3DAF3E566 /* SaveTmpFileRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SaveTmpFileRegressionTests.swift; sourceTree = "<group>"; };
 		2C71D93679EE4326E40DE343 /* Gridka.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Gridka.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		2E855B5DD828CDC8148B73A2 /* GroupByPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupByPanelController.swift; sourceTree = "<group>"; };
 		34F32E97C84532FE333CC550 /* ProfilerSidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfilerSidebarView.swift; sourceTree = "<group>"; };
@@ -309,6 +311,7 @@
 				126D09110628E6BFA4E1585B /* large.csv */,
 				03F6EA6E4B2F86186B51B0CE /* QueryCoordinatorTests.swift */,
 				E4EECE9D1DFD8888D7C5E80B /* RowCacheTests.swift */,
+				29D57AE55F0973A3DAF3E566 /* SaveTmpFileRegressionTests.swift */,
 				E206BCEACC03C5EA52458503 /* StaleReloadClampTests.swift */,
 				F2DB69E39CDA2D745413C2D2 /* SummaryCounterTests.swift */,
 			);
@@ -431,7 +434,6 @@
 				};
 			};
 			buildConfigurationList = D7183C181D46FC15DF6B328E /* Build configuration list for PBXProject "Gridka" */;
-			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -441,6 +443,7 @@
 			mainGroup = D3BDB7CE3E03BF9B11BA89C3;
 			minimizedProjectReferenceProxies = 1;
 			preferredProjectObjectVersion = 77;
+			productRefGroup = 0E58A68D4E7867E0CE109193 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -513,6 +516,7 @@
 				8D2333827090BDCE78058109 /* GridkaTests.swift in Sources */,
 				44E010CD2BD6D258B7F1D93A /* QueryCoordinatorTests.swift in Sources */,
 				D19D8BF3091F9653AD70D4E2 /* RowCacheTests.swift in Sources */,
+				88FC9FAC2B9DFDFC736F0336 /* SaveTmpFileRegressionTests.swift in Sources */,
 				FD8A62505EB24CA9F19F45E9 /* StaleReloadClampTests.swift in Sources */,
 				CCEF99BF940F7DE4EB5EF98C /* SummaryCounterTests.swift in Sources */,
 			);
@@ -624,7 +628,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Gridka.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 9;
 				HEADER_SEARCH_PATHS = (
 					"$(PROJECT_DIR)/Libraries",
 				);
@@ -636,7 +640,7 @@
 				LIBRARY_SEARCH_PATHS = (
 					"$(PROJECT_DIR)/Libraries",
 				);
-				MARKETING_VERSION = 1.2.1;
+				MARKETING_VERSION = 1.3.1;
 				OTHER_LDFLAGS = (
 					"-lduckdb",
 					"-lc++",
@@ -749,7 +753,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Gridka.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 9;
 				HEADER_SEARCH_PATHS = (
 					"$(PROJECT_DIR)/Libraries",
 				);
@@ -761,7 +765,7 @@
 				LIBRARY_SEARCH_PATHS = (
 					"$(PROJECT_DIR)/Libraries",
 				);
-				MARKETING_VERSION = 1.2.1;
+				MARKETING_VERSION = 1.3.1;
 				OTHER_LDFLAGS = (
 					"-lduckdb",
 					"-lc++",
@@ -777,14 +781,14 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = GridkaQuickLook.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 9;
 				INFOPLIST_FILE = QuickLookExtension/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 					"@executable_path/../../../../Frameworks",
 				);
-				MARKETING_VERSION = 1.2.1;
+				MARKETING_VERSION = 1.3.1;
 				PRODUCT_BUNDLE_IDENTIFIER = org.ceesaxp.gridka.app.quicklook;
 				PRODUCT_NAME = GridkaQuickLook;
 				SDKROOT = macosx;
@@ -880,14 +884,14 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = GridkaQuickLook.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 9;
 				INFOPLIST_FILE = QuickLookExtension/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 					"@executable_path/../../../../Frameworks",
 				);
-				MARKETING_VERSION = 1.2.1;
+				MARKETING_VERSION = 1.3.1;
 				PRODUCT_BUNDLE_IDENTIFIER = org.ceesaxp.gridka.app.quicklook;
 				PRODUCT_NAME = GridkaQuickLook;
 				SDKROOT = macosx;
