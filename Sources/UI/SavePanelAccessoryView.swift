@@ -64,7 +64,7 @@ final class SavePanelAccessoryView: NSView {
     // MARK: - Init
 
     init(detectedEncoding: String, currentDelimiter: String) {
-        super.init(frame: NSRect(x: 0, y: 0, width: 400, height: 60))
+        super.init(frame: NSRect(x: 0, y: 0, width: 320, height: 78))
         setupUI()
         selectEncoding(matching: detectedEncoding)
         selectDelimiter(matching: currentDelimiter)
@@ -81,15 +81,11 @@ final class SavePanelAccessoryView: NSView {
         translatesAutoresizingMaskIntoConstraints = false
 
         let encodingLabel = NSTextField(labelWithString: "Encoding:")
-        encodingLabel.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
-        encodingLabel.translatesAutoresizingMaskIntoConstraints = false
-
         let delimiterLabel = NSTextField(labelWithString: "Delimiter:")
-        delimiterLabel.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
-        delimiterLabel.translatesAutoresizingMaskIntoConstraints = false
-
-        encodingPopup.translatesAutoresizingMaskIntoConstraints = false
-        delimiterPopup.translatesAutoresizingMaskIntoConstraints = false
+        for label in [encodingLabel, delimiterLabel] {
+            label.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+            label.alignment = .right
+        }
 
         for option in Self.encodingOptions {
             encodingPopup.addItem(withTitle: option.name)
@@ -99,33 +95,37 @@ final class SavePanelAccessoryView: NSView {
             delimiterPopup.addItem(withTitle: option.name)
         }
 
-        addSubview(encodingLabel)
-        addSubview(encodingPopup)
-        addSubview(delimiterLabel)
-        addSubview(delimiterPopup)
+        // The save panel is narrow (and got narrower again in macOS 27), so the
+        // popups must be able to shrink rather than force the accessory view
+        // wider than the panel — a fixed-width row gets clipped.
+        for popup in [encodingPopup, delimiterPopup] {
+            popup.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            popup.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            // Preferred width, not required: wide enough for the longest title
+            // but yielding to the panel's width if it is narrower still.
+            let preferredWidth = popup.widthAnchor.constraint(greaterThanOrEqualToConstant: 170)
+            preferredWidth.priority = .defaultHigh
+            preferredWidth.isActive = true
+        }
+
+        let grid = NSGridView(views: [
+            [encodingLabel, encodingPopup],
+            [delimiterLabel, delimiterPopup],
+        ])
+        grid.translatesAutoresizingMaskIntoConstraints = false
+        grid.rowSpacing = 8
+        grid.columnSpacing = 8
+        grid.column(at: 0).xPlacement = .trailing
+        grid.column(at: 1).xPlacement = .fill
+        grid.rowAlignment = .firstBaseline
+        addSubview(grid)
 
         NSLayoutConstraint.activate([
-            // Height
-            heightAnchor.constraint(equalToConstant: 60),
-            widthAnchor.constraint(greaterThanOrEqualToConstant: 400),
-
-            // Encoding row
-            encodingLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            encodingLabel.centerYAnchor.constraint(equalTo: topAnchor, constant: 15),
-            encodingLabel.widthAnchor.constraint(equalToConstant: 68),
-
-            encodingPopup.leadingAnchor.constraint(equalTo: encodingLabel.trailingAnchor, constant: 4),
-            encodingPopup.centerYAnchor.constraint(equalTo: encodingLabel.centerYAnchor),
-            encodingPopup.widthAnchor.constraint(equalToConstant: 180),
-
-            // Delimiter row (same line, right side)
-            delimiterLabel.leadingAnchor.constraint(equalTo: encodingPopup.trailingAnchor, constant: 20),
-            delimiterLabel.centerYAnchor.constraint(equalTo: encodingLabel.centerYAnchor),
-            delimiterLabel.widthAnchor.constraint(equalToConstant: 68),
-
-            delimiterPopup.leadingAnchor.constraint(equalTo: delimiterLabel.trailingAnchor, constant: 4),
-            delimiterPopup.centerYAnchor.constraint(equalTo: encodingLabel.centerYAnchor),
-            delimiterPopup.widthAnchor.constraint(equalToConstant: 120),
+            grid.centerXAnchor.constraint(equalTo: centerXAnchor),
+            grid.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 20),
+            grid.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -20),
+            grid.topAnchor.constraint(equalTo: topAnchor, constant: 12),
+            grid.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12),
         ])
     }
 

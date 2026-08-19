@@ -728,7 +728,7 @@ final class FileSession {
         let delimiterEscaped = effectiveDelimiter.replacingOccurrences(of: "'", with: "''")
         let headerParam = hasHeaders ? "true" : "false"
 
-        let sql = "COPY (SELECT \(exportColumns) FROM data) TO '\(path)' (FORMAT CSV, HEADER \(headerParam), DELIMITER '\(delimiterEscaped)', FORCE_QUOTE *)"
+        let sql = "COPY (SELECT \(exportColumns) FROM data) TO '\(path)' (FORMAT CSV, HEADER \(headerParam), DELIMITER '\(delimiterEscaped)', FORCE_QUOTE *, USE_TMP_FILE false)"
 
         queryQueue.async { [weak self] in
             do {
@@ -768,7 +768,7 @@ final class FileSession {
         if encoding == .utf8 {
             // DuckDB COPY TO natively supports UTF-8
             let path = url.path.replacingOccurrences(of: "'", with: "''")
-            let sql = "COPY (SELECT \(exportColumns) FROM data) TO '\(path)' (FORMAT CSV, HEADER \(headerParam), DELIMITER '\(delimiterEscaped)', FORCE_QUOTE *)"
+            let sql = "COPY (SELECT \(exportColumns) FROM data) TO '\(path)' (FORMAT CSV, HEADER \(headerParam), DELIMITER '\(delimiterEscaped)', FORCE_QUOTE *, USE_TMP_FILE false)"
 
             queryQueue.async { [weak self] in
                 do {
@@ -895,7 +895,7 @@ final class FileSession {
         let columnList = exportColumns.joined(separator: ", ")
 
         let path = url.path.replacingOccurrences(of: "'", with: "''")
-        let sql = "COPY (SELECT \(columnList) FROM \(source)) TO '\(path)' (FORMAT CSV, HEADER true, DELIMITER ',', FORCE_QUOTE *)"
+        let sql = "COPY (SELECT \(columnList) FROM \(source)) TO '\(path)' (FORMAT CSV, HEADER true, DELIMITER ',', FORCE_QUOTE *, USE_TMP_FILE false)"
 
         queryQueue.async { [weak self] in
             do {
@@ -930,7 +930,7 @@ final class FileSession {
             .joined(separator: ", ")
 
         let path = url.path.replacingOccurrences(of: "'", with: "''")
-        let sql = "COPY (SELECT \(exportColumns) FROM \(QueryCoordinator.quote(tableName))) TO '\(path)' (FORMAT CSV, HEADER true, DELIMITER ',', FORCE_QUOTE *)"
+        let sql = "COPY (SELECT \(exportColumns) FROM \(QueryCoordinator.quote(tableName))) TO '\(path)' (FORMAT CSV, HEADER true, DELIMITER ',', FORCE_QUOTE *, USE_TMP_FILE false)"
 
         queryQueue.async { [weak self] in
             do {

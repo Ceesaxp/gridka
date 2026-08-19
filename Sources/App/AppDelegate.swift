@@ -224,9 +224,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         let editMenuItem = NSMenuItem()
         let editMenu = NSMenu(title: "Edit")
 
-        let copyCellItem = NSMenuItem(title: "Copy Cell", action: #selector(copyCellAction(_:)), keyEquivalent: "c")
-        copyCellItem.target = self
-        editMenu.addItem(copyCellItem)
+        // Standard editing commands. These deliberately have no explicit target
+        // so they travel the responder chain: while a cell (or the search field)
+        // is being edited the field editor handles them; otherwise they reach
+        // TableViewController, which maps copy: to "copy the selected cell".
+        editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        let redoItem = NSMenuItem(title: "Redo", action: Selector(("redo:")), keyEquivalent: "z")
+        redoItem.keyEquivalentModifierMask = [.command, .shift]
+        editMenu.addItem(redoItem)
+
+        editMenu.addItem(NSMenuItem.separator())
+
+        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: "Delete", action: #selector(NSText.delete(_:)), keyEquivalent: "")
 
         let copyRowItem = NSMenuItem(title: "Copy Row", action: #selector(copyRowAction(_:)), keyEquivalent: "c")
         copyRowItem.keyEquivalentModifierMask = [.command, .shift]
@@ -960,10 +972,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
 
     // MARK: - Copy Actions
-
-    @objc private func copyCellAction(_ sender: Any?) {
-        activeTab?.tableViewController?.copyCellValue(sender)
-    }
 
     @objc private func copyRowAction(_ sender: Any?) {
         activeTab?.tableViewController?.copyRowValues(sender)
@@ -1734,12 +1742,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             menuItem.title = "Delete Column"
             return false
         }
+        if menuItem.action == #selector(copyRowAction(_:)) || menuItem.action == #selector(copyColumnAction(_:)) {
+            return tvc != nil && tvc?.isEditingCell != true
+        }
         if menuItem.action == #selector(addRowAction(_:)) {
             return !isSummary && (session?.isFullyLoaded ?? false)
         }
         if menuItem.action == #selector(deleteRowsAction(_:)) {
             if isSummary { return false }
             guard session?.isFullyLoaded ?? false else { return false }
+            // ⌘⌫ belongs to the field editor while a cell is being edited.
+            if tvc?.isEditingCell == true { return false }
             return (tvc?.tableView.selectedRowIndexes.isEmpty == false)
         }
         if menuItem.action == #selector(toggleHeaderAction(_:)) {

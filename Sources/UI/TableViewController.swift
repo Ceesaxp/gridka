@@ -1287,6 +1287,19 @@ final class TableViewController: NSViewController {
         return values.joined(separator: "\n")
     }
 
+    /// True while an inline cell edit is in progress. Grid-wide commands
+    /// (copy row/column, delete rows) stand down so their key equivalents fall
+    /// through to the field editor — ⌘⌫ in particular means "delete to start of
+    /// line" while typing, not "delete the selected rows".
+    var isEditingCell: Bool { editField != nil }
+
+    /// Responder-chain entry point for ⌘C. Reached only when no text field is
+    /// editing — the field editor handles copy: first while a cell is open for
+    /// editing, which is what makes ⌘C/⌘X/⌘V work inside a cell.
+    @objc func copy(_ sender: Any?) {
+        copyCellValue(sender)
+    }
+
     @objc func copyCellValue(_ sender: Any?) {
         guard let text = selectedCellText() else { return }
         NSPasteboard.general.clearContents()
@@ -1766,6 +1779,17 @@ final class TableViewController: NSViewController {
                 break
             }
         }
+    }
+}
+
+// MARK: - NSMenuItemValidation
+
+extension TableViewController: NSMenuItemValidation {
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(copy(_:)) {
+            return selectedCellText() != nil
+        }
+        return true
     }
 }
 
