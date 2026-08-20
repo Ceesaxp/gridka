@@ -1035,6 +1035,14 @@ final class TableViewController: NSViewController {
         updateCellHighlight(row: clickedRow, column: clickedCol)
         updateDetailPane()
         statusBar.updateCellLocation(row: clickedRow, columnName: selectedColumnName)
+
+        if let event = NSApp.currentEvent,
+           GridCellTextField.shouldOpenLink(clickCount: event.clickCount, modifierFlags: event.modifierFlags),
+           let cell = tableView.view(atColumn: clickedCol, row: clickedRow, makeIfNecessary: false) as? GridCellTextField,
+           let url = cell.linkURL,
+           cell.isLink(at: cell.convert(event.locationInWindow, from: nil)) {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     @objc private func tableViewDoubleClicked(_ sender: Any?) {
@@ -1043,6 +1051,16 @@ final class TableViewController: NSViewController {
 
         guard clickedRow >= 0, clickedCol >= 0, clickedCol < tableView.numberOfColumns else { return }
         guard let session = fileSession, session.isFullyLoaded else { return }
+
+        if let event = NSApp.currentEvent,
+           GridCellTextField.shouldSuppressEditingForLink(
+               clickCount: event.clickCount,
+               modifierFlags: event.modifierFlags
+           ),
+           let cell = tableView.view(atColumn: clickedCol, row: clickedRow, makeIfNecessary: false) as? GridCellTextField,
+           cell.isLink(at: cell.convert(event.locationInWindow, from: nil)) {
+            return
+        }
 
         let columnName = tableView.tableColumns[clickedCol].identifier.rawValue
 
@@ -1673,7 +1691,13 @@ final class TableViewController: NSViewController {
         return style
     }()
 
-    private func formatValue(_ value: DuckDBValue, displayType: DisplayType, rightAlign: Bool = false) -> NSAttributedString {
+    private func formatValue(
+        _ value: DuckDBValue,
+        displayType: DisplayType,
+        rightAlign: Bool = false,
+        linkURL: URL? = nil,
+        isRowSelected: Bool = false
+    ) -> NSAttributedString {
         var attrs: [NSAttributedString.Key: Any] = [:]
         if rightAlign {
             attrs[.paragraphStyle] = TableViewController.rightParagraphStyle
@@ -1699,6 +1723,10 @@ final class TableViewController: NSViewController {
             }
             return NSAttributedString(string: v, attributes: attrs)
         case .string(let v):
+            if linkURL != nil {
+                attrs[.foregroundColor] = GridCellTextField.linkTextColor(isSelected: isRowSelected)
+                attrs[.underlineStyle] = NSUnderlineStyle.single.rawValue
+            }
             return NSAttributedString(string: v, attributes: attrs)
         }
     }
@@ -1835,6 +1863,19 @@ extension TableViewController: NSTableViewDataSource {
 
 extension TableViewController: NSTableViewDelegate {
 
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        if let rowView = tableView.makeView(
+            withIdentifier: GridTableRowView.reuseIdentifier,
+            owner: self
+        ) as? GridTableRowView {
+            return rowView
+        }
+
+        let rowView = GridTableRowView()
+        rowView.identifier = GridTableRowView.reuseIdentifier
+        return rowView
+    }
+
     func tableView(_ tableView: NSTableView, didClick tableColumn: NSTableColumn) {
         guard let session = fileSession else { return }
         let columnName = tableColumn.identifier.rawValue
@@ -1880,9 +1921,9 @@ extension TableViewController: NSTableViewDelegate {
         let identifier = tableColumn.identifier
         let columnName = identifier.rawValue
 
-        var cellView = tableView.makeView(withIdentifier: identifier, owner: self) as? NSTextField
+        var cellView = tableView.makeView(withIdentifier: identifier, owner: self) as? GridCellTextField
         if cellView == nil {
-            let textField = NSTextField()
+            let textField = GridCellTextField()
             textField.identifier = identifier
             textField.isBordered = false
             textField.drawsBackground = false
@@ -1904,13 +1945,31 @@ extension TableViewController: NSTableViewDelegate {
         let isNumeric = displayType == .integer || displayType == .float
 
         if let value = value {
-            cell.attributedStringValue = formatValue(value, displayType: displayType, rightAlign: isNumeric)
+            let linkURL: URL?
+            if SettingsManager.shared.clickableWebLinks,
+               case .string(let text) = value {
+                linkURL = HTTPURLParser.parse(
+                    text,
+                    allowUserInfo: SettingsManager.shared.allowCredentialedWebLinks
+                )
+            } else {
+                linkURL = nil
+            }
+            cell.attributedStringValue = formatValue(
+                value,
+                displayType: displayType,
+                rightAlign: isNumeric,
+                linkURL: linkURL,
+                isRowSelected: tableView.selectedRowIndexes.contains(row)
+            )
+            cell.linkURL = linkURL
         } else {
             // Cache miss — show placeholder and request fetch
             cell.attributedStringValue = NSAttributedString(
                 string: "...",
                 attributes: [.foregroundColor: NSColor.tertiaryLabelColor]
             )
+            cell.linkURL = nil
             requestPageFetch(forRow: row)
         }
 
@@ -1918,6 +1977,96 @@ extension TableViewController: NSTableViewDelegate {
         updateEditedDot(on: cell, row: row, columnName: columnName, session: session)
 
         return cell
+    }
+}
+
+final class GridTableRowView: NSTableRowView {
+    static let reuseIdentifier = NSUserInterfaceItemIdentifier("GridTableRowView")
+
+    override var isSelected: Bool {
+        didSet {
+            guard isSelected != oldValue else { return }
+            updateLinkTextColors()
+        }
+    }
+
+    override var isEmphasized: Bool {
+        didSet {
+            guard isEmphasized != oldValue else { return }
+            updateLinkTextColors()
+        }
+    }
+
+    override func didAddSubview(_ subview: NSView) {
+        super.didAddSubview(subview)
+        if let cell = subview as? GridCellTextField {
+            cell.updateLinkTextColor(isSelected: isSelected, isEmphasized: isEmphasized)
+        }
+    }
+
+    private func updateLinkTextColors() {
+        for case let cell as GridCellTextField in subviews {
+            cell.updateLinkTextColor(isSelected: isSelected, isEmphasized: isEmphasized)
+        }
+    }
+}
+
+final class GridCellTextField: NSTextField {
+    private static let linkActivationModifiers: NSEvent.ModifierFlags = [.command, .shift, .option, .control]
+
+    static func shouldOpenLink(clickCount: Int, modifierFlags: NSEvent.ModifierFlags) -> Bool {
+        return clickCount == 1 && modifierFlags.intersection(linkActivationModifiers).isEmpty
+    }
+
+    static func shouldSuppressEditingForLink(clickCount: Int, modifierFlags: NSEvent.ModifierFlags) -> Bool {
+        return clickCount == 2 && modifierFlags.intersection(linkActivationModifiers).isEmpty
+    }
+
+    static func linkTextColor(isSelected: Bool, isEmphasized: Bool = true) -> NSColor {
+        guard isSelected else { return .linkColor }
+        return isEmphasized ? .alternateSelectedControlTextColor : .unemphasizedSelectedTextColor
+    }
+
+    var linkURL: URL? {
+        didSet {
+            if linkURL != oldValue {
+                window?.invalidateCursorRects(for: self)
+            }
+        }
+    }
+
+    func updateLinkTextColor(isSelected: Bool, isEmphasized: Bool = true) {
+        guard linkURL != nil, attributedStringValue.length > 0 else { return }
+
+        let value = NSMutableAttributedString(attributedString: attributedStringValue)
+        value.addAttribute(
+            .foregroundColor,
+            value: Self.linkTextColor(isSelected: isSelected, isEmphasized: isEmphasized),
+            range: NSRange(location: 0, length: value.length)
+        )
+        attributedStringValue = value
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        guard linkURL != nil else { return }
+
+        let cursorRect = linkTextRect.intersection(visibleRect)
+        if !cursorRect.isEmpty {
+            addCursorRect(cursorRect, cursor: .pointingHand)
+        }
+    }
+
+    func isLink(at point: NSPoint) -> Bool {
+        return linkURL != nil && linkTextRect.contains(point)
+    }
+
+    private var linkTextRect: NSRect {
+        guard let cell else { return .zero }
+
+        var textRect = cell.drawingRect(forBounds: bounds)
+        textRect.size.width = min(ceil(attributedStringValue.size().width), textRect.width)
+        return textRect
     }
 }
 

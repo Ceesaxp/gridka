@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		025D161AFAD18C70038E602A /* DuckDBEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00F214CA34AF0DFD2013C74 /* DuckDBEngine.swift */; };
 		03098BFA16BA2C0C66D633D9 /* TableViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1168207DE5F39A9D60E99322 /* TableViewController.swift */; };
+		067F0438C86B695192BC31CA /* HTTPURLParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1872794A6102CDAF25778981 /* HTTPURLParser.swift */; };
 		08FA83CC46F43CB4F1DFB9E7 /* FileSessionCrashRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0167333A7467F79F5487189 /* FileSessionCrashRegressionTests.swift */; };
 		09196D1921A3B731714C2BF0 /* ColumnDescriptor.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBF535A46B11B725AB239D85 /* ColumnDescriptor.swift */; };
 		0BA303F61CDE98113F15FAE8 /* GridkaTestHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFC3AA1AF674C208ECA378FD /* GridkaTestHelpers.swift */; };
@@ -41,6 +42,7 @@
 		A961FD9E79B3EED6E832746A /* ProfilerSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34F32E97C84532FE333CC550 /* ProfilerSidebarView.swift */; };
 		AD760EA59244EAEE9DBF1912 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = BC73BA0F81338640148BCEA9 /* PrivacyInfo.xcprivacy */; };
 		AF4E4BFFF3691EA2AF67AFE9 /* FrequencyPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F5B2E9C45FF7BE9B2E9C7B7 /* FrequencyPanelController.swift */; };
+		B0163C6A2EA21404C52EC57A /* HTTPURLParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CE008E3DD33EB1F7596671D /* HTTPURLParserTests.swift */; };
 		B3AE51D9F5131DB47B5DDDE1 /* DuckDBTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = C22180CA047E37DAD0858907 /* DuckDBTypes.swift */; };
 		C335C4285ED0BAF57F46E4B8 /* HelpWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB01BCC199BE389372DD1EC7 /* HelpWindowController.swift */; };
 		C54CC3942888E9611DA63299 /* RowCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8386EE403F8E135B0B6E8392 /* RowCache.swift */; };
@@ -55,6 +57,7 @@
 		D41544D8692C6AD39F339803 /* ExpressionInjectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 295CD84B9E7A7445423A459E /* ExpressionInjectionTests.swift */; };
 		E5577C229385C5F5D2D2EA12 /* StatusBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98A7AB533AFA6EF101BC7CA1 /* StatusBarView.swift */; };
 		E62C405830BD0D1F5EC96525 /* HistogramView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C8A563F4BB78B24274859F8 /* HistogramView.swift */; };
+		E6AB8BE63380DA17205DF82C /* SettingsManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 734CBAF2764ACF9AE6CCAB42 /* SettingsManagerTests.swift */; };
 		E87075694F60C341E5122D47 /* large.csv in Resources */ = {isa = PBXBuildFile; fileRef = 126D09110628E6BFA4E1585B /* large.csv */; };
 		EE85A12F8509B1B53AC73E1D /* SettingsManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8728176BC67BC3E88503A1F /* SettingsManager.swift */; };
 		EE9F9BDE9EAEDE34A4C1F516 /* cb-companies.csv in Resources */ = {isa = PBXBuildFile; fileRef = 1CECB8E24CB06B3026E6B2AD /* cb-companies.csv */; };
@@ -115,6 +118,7 @@
 		126D09110628E6BFA4E1585B /* large.csv */ = {isa = PBXFileReference; path = large.csv; sourceTree = "<group>"; };
 		148A6DDD81329D4341B12A95 /* ComputedColumnPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComputedColumnPanelController.swift; sourceTree = "<group>"; };
 		15FCA2638045DB76E9039F92 /* GridkaTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GridkaTests.swift; sourceTree = "<group>"; };
+		1872794A6102CDAF25778981 /* HTTPURLParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPURLParser.swift; sourceTree = "<group>"; };
 		18BD14A2379A4CF2905D7D7C /* SearchBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchBarView.swift; sourceTree = "<group>"; };
 		1948F2C9A6E24B144656D488 /* ViewState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewState.swift; sourceTree = "<group>"; };
 		1CECB8E24CB06B3026E6B2AD /* cb-companies.csv */ = {isa = PBXFileReference; path = "cb-companies.csv"; sourceTree = "<group>"; };
@@ -126,6 +130,7 @@
 		34F32E97C84532FE333CC550 /* ProfilerSidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfilerSidebarView.swift; sourceTree = "<group>"; };
 		36241D62915EDB2349369A0E /* GridkaTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = GridkaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		36BE1292EC44C7C3C6B357F8 /* FileSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileSession.swift; sourceTree = "<group>"; };
+		3CE008E3DD33EB1F7596671D /* HTTPURLParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPURLParserTests.swift; sourceTree = "<group>"; };
 		3EFEA56E058198CE00FF1896 /* GridkaUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = GridkaUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		3F0514B553D8369EA17C238D /* ColumnSummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColumnSummary.swift; sourceTree = "<group>"; };
 		428655CECCDD91C856F6EB10 /* TopValuesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopValuesView.swift; sourceTree = "<group>"; };
@@ -135,6 +140,7 @@
 		5046EEEDA6E24A2F5833DD08 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		64759D5C280057B7C2DF1ED5 /* AddColumnSheetController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddColumnSheetController.swift; sourceTree = "<group>"; };
 		675C8373DE67B390BDF3D56F /* FrequencyBarChartView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrequencyBarChartView.swift; sourceTree = "<group>"; };
+		734CBAF2764ACF9AE6CCAB42 /* SettingsManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsManagerTests.swift; sourceTree = "<group>"; };
 		78B4F3196FBFD18EE1CEFE04 /* FilterBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilterBarView.swift; sourceTree = "<group>"; };
 		7B0B36184783559FAD4B4095 /* DetailPaneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailPaneView.swift; sourceTree = "<group>"; };
 		7C72561B0D6B94EE6B2F0651 /* ProfilerQueryBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfilerQueryBuilder.swift; sourceTree = "<group>"; };
@@ -260,6 +266,7 @@
 				2E855B5DD828CDC8148B73A2 /* GroupByPanelController.swift */,
 				DB01BCC199BE389372DD1EC7 /* HelpWindowController.swift */,
 				0C8A563F4BB78B24274859F8 /* HistogramView.swift */,
+				1872794A6102CDAF25778981 /* HTTPURLParser.swift */,
 				34F32E97C84532FE333CC550 /* ProfilerSidebarView.swift */,
 				1E553B133E5373521C491798 /* RenameColumnPopoverController.swift */,
 				10A445128E17068857A74D6D /* SavePanelAccessoryView.swift */,
@@ -308,10 +315,12 @@
 				DFC3AA1AF674C208ECA378FD /* GridkaTestHelpers.swift */,
 				15FCA2638045DB76E9039F92 /* GridkaTests.swift */,
 				F916F23483BAD9488B21BF49 /* headerless.csv */,
+				3CE008E3DD33EB1F7596671D /* HTTPURLParserTests.swift */,
 				126D09110628E6BFA4E1585B /* large.csv */,
 				03F6EA6E4B2F86186B51B0CE /* QueryCoordinatorTests.swift */,
 				E4EECE9D1DFD8888D7C5E80B /* RowCacheTests.swift */,
 				29D57AE55F0973A3DAF3E566 /* SaveTmpFileRegressionTests.swift */,
+				734CBAF2764ACF9AE6CCAB42 /* SettingsManagerTests.swift */,
 				E206BCEACC03C5EA52458503 /* StaleReloadClampTests.swift */,
 				F2DB69E39CDA2D745413C2D2 /* SummaryCounterTests.swift */,
 			);
@@ -514,9 +523,11 @@
 				9528BD460FDC26C5F926A4A4 /* FileSessionShutdownTests.swift in Sources */,
 				0BA303F61CDE98113F15FAE8 /* GridkaTestHelpers.swift in Sources */,
 				8D2333827090BDCE78058109 /* GridkaTests.swift in Sources */,
+				B0163C6A2EA21404C52EC57A /* HTTPURLParserTests.swift in Sources */,
 				44E010CD2BD6D258B7F1D93A /* QueryCoordinatorTests.swift in Sources */,
 				D19D8BF3091F9653AD70D4E2 /* RowCacheTests.swift in Sources */,
 				88FC9FAC2B9DFDFC736F0336 /* SaveTmpFileRegressionTests.swift in Sources */,
+				E6AB8BE63380DA17205DF82C /* SettingsManagerTests.swift in Sources */,
 				FD8A62505EB24CA9F19F45E9 /* StaleReloadClampTests.swift in Sources */,
 				CCEF99BF940F7DE4EB5EF98C /* SummaryCounterTests.swift in Sources */,
 			);
@@ -544,6 +555,7 @@
 				AF4E4BFFF3691EA2AF67AFE9 /* FrequencyPanelController.swift in Sources */,
 				17F7AD8BD0ABAD27C9FE5806 /* GridkaError.swift in Sources */,
 				63285D263445081D0918D2F8 /* GroupByPanelController.swift in Sources */,
+				067F0438C86B695192BC31CA /* HTTPURLParser.swift in Sources */,
 				C335C4285ED0BAF57F46E4B8 /* HelpWindowController.swift in Sources */,
 				E62C405830BD0D1F5EC96525 /* HistogramView.swift in Sources */,
 				D0C41CC8DC6C829F43B6751A /* ProfilerQueryBuilder.swift in Sources */,
