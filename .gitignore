@@ -9,7 +9,12 @@ scripts/
 xcuserdata/
 DerivedData/
 build/
+dist/
 *.xcworkspace/
+
+# Signing / distribution artifacts
+*.cer
+*.p8
 
 # DuckDB binary (too large for git, use Libraries/download-duckdb.sh)
 Libraries/libduckdb.dylib
