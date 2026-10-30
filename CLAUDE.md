@@ -59,7 +59,7 @@ SELECT * FROM data
 LIMIT <page_size> OFFSET <page_start>
 ```
 
-Filters combine with AND. Global search ORs across all columns cast to TEXT with ILIKE. Sort supports multi-column via shift+click.
+Filters combine with AND. Global search ORs across all columns cast to TEXT with ILIKE. Sort uses Option+click and supports multi-column via Shift+Option+click.
 
 ## Testing
 

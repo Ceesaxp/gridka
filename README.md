@@ -16,7 +16,7 @@ Most CSV tools either choke on large files (Excel, Numbers), consume absurd memo
 
 - **Open any CSV/TSV** — auto-detects delimiter, encoding, headers, and column types
 - **Virtual scrolling** — 60 fps at any file size; only visible rows are in memory
-- **Column sorting** — click to sort, Shift+click for multi-column sort
+- **Column sorting** — Option+click a header to sort, Shift+Option+click for multi-column sort
 - **Filtering** — type-aware filters per column (text, numeric, date, boolean operators)
 - **Global search** — `Cmd+F` to search across all columns with match highlighting
 - **Column management** — resize, reorder, hide/show, rename, delete, auto-fit
@@ -88,8 +88,10 @@ open Gridka.xcodeproj
 | `Option+Cmd+N` | Add column |
 | `Option+Cmd+R` | Add row |
 | `Cmd+Delete` | Delete selected row(s) |
-| Click header | Sort ascending/descending/clear |
-| Shift+click header | Multi-column sort |
+| Click header | Toggle column selection |
+| Option+click header | Sort ascending/descending/clear |
+| Shift+Option+click header | Add secondary sort column |
+| Click right edge of sorted header | Cycle ascending/descending/clear |
 | Right-click header | Filter / hide / rename / frequency |
 | Right-click cell | Copy / filter by value / exclude value |
 | Double-click divider | Auto-fit column width |
