@@ -173,8 +173,9 @@ final class HelpWindowController: NSWindowController {
         result.append(spacing())
 
         result.append(styledSection("Table"))
-        result.append(styledShortcut("Click header", "Sort ascending (click again: descending, again: clear)"))
-        result.append(styledShortcut("\u{21E7}+Click header", "Add secondary sort column"))
+        result.append(styledShortcut("Click header", "Toggle column selection"))
+        result.append(styledShortcut("\u{2325}+Click header", "Sort ascending (repeat: descending, then clear)"))
+        result.append(styledShortcut("\u{21E7}\u{2325}+Click header", "Add secondary sort column"))
         result.append(styledShortcut("Double-click divider", "Auto-fit column width"))
         result.append(styledShortcut("Right-click header", "Filter / hide column"))
         result.append(styledShortcut("Right-click cell", "Copy / filter by value"))
@@ -256,9 +257,14 @@ final class HelpWindowController: NSWindowController {
 
         result.append(styledSection("Multi-Column Sort"))
         result.append(styledBody("""
-        Click a column header to sort by that column. Hold Shift and click another \
-        header to add a secondary sort. You can build a multi-level sort order this way. \
-        Click a sorted column again to reverse its direction, or a third time to remove it.
+        Hold Option and click a column header to sort by that column. Hold Shift and \
+        Option and click another header to add a secondary sort. You can build a \
+        multi-level sort order this way. Option-click a sorted column again to reverse \
+        its direction, or a third time to remove it. You can also click the right edge \
+        of an already sorted header to cycle its sort without holding Option.
+
+        A plain click on the header text toggles column selection. Sorting is available \
+        once the file has finished loading.
         """))
         result.append(spacing())
         result.append(spacing())
