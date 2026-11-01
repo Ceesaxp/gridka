@@ -1,0 +1,53 @@
+name: Quick Look ARM runtime
+
+on:
+  push:
+    branches: [master, fix/quick-look-preview]
+    paths:
+      - QuickLookExtension/**
+      - ci_scripts/quicklook/**
+      - project.yml
+      - .github/workflows/quicklook-runtime.yml
+  pull_request:
+    branches: [master]
+    paths:
+      - QuickLookExtension/**
+      - ci_scripts/quicklook/**
+      - project.yml
+      - .github/workflows/quicklook-runtime.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quicklook-arm64-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quicklook-arm64:
+    # The standard macos-15 label uses Apple Silicon. Verify this at runtime too.
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify native Apple Silicon runner
+        run: test "$(uname -m)" = arm64
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        run: xcodegen generate
+      - name: Inspect Release extension runtime and regression controls
+        shell: bash
+        run: |
+          set -o pipefail
+          bash ci_scripts/quicklook/check-arm64.sh 2>&1 | tee quicklook-arm64.txt
+      - name: Save runtime log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quicklook-arm64-runtime
+          path: quicklook-arm64.txt
+          if-no-files-found: warn
