@@ -2,7 +2,7 @@ import Foundation
 import Quartz
 import UniformTypeIdentifiers
 
-final class PreviewProvider: QLPreviewProvider {
+final class PreviewProvider: QLPreviewProvider, QLPreviewingController {
 
     func providePreview(for request: QLFilePreviewRequest) async throws -> QLPreviewReply {
         let url = request.fileURL
