@@ -3,6 +3,7 @@
 #import <objc/runtime.h>
 #import <mach-o/dyld.h>
 #include <sys/sysctl.h>
+#include <sys/stat.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -59,7 +60,12 @@ __attribute__((constructor)) static void inspectQuickLook(void) {
         check(provider != Nil, "principal class resolves in extension process");
         const char *image = provider ? class_getImageName(provider) : NULL;
         const char *mainImage = _dyld_get_image_name(0);
-        check(image && mainImage && strcmp(image, mainImage) == 0,
+        fprintf(stdout, "Provider image: %s\nMain image: %s\n",
+                image ?: "(null)", mainImage ?: "(null)");
+        // dyld and Objective-C may report equivalent paths with different spelling.
+        struct stat providerFile, mainFile;
+        check(image && mainImage && stat(image, &providerFile) == 0 && stat(mainImage, &mainFile) == 0
+              && providerFile.st_dev == mainFile.st_dev && providerFile.st_ino == mainFile.st_ino,
               "provider belongs to actual extension executable");
         check(provider && class_getSuperclass(provider) == [QLPreviewProvider class], "QLPreviewProvider superclass");
         check(provider && class_conformsToProtocol(provider, @protocol(QLPreviewingController)),
