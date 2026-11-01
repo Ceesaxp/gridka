@@ -5,7 +5,7 @@
 #include <sys/sysctl.h>
 #include <sys/stat.h>
 #include <stdlib.h>
-#include <string.h>
+#include <limits.h>
 
 // Loaded into a test-only copy of the Release extension, before NSExtensionMain.
 // Do not define PreviewProvider here: all class metadata must come from the appex.
@@ -59,12 +59,15 @@ __attribute__((constructor)) static void inspectQuickLook(void) {
         Class provider = [principal isKindOfClass:[NSString class]] ? NSClassFromString(principal) : Nil;
         check(provider != Nil, "principal class resolves in extension process");
         const char *image = provider ? class_getImageName(provider) : NULL;
-        const char *mainImage = _dyld_get_image_name(0);
+        // With DYLD_INSERT_LIBRARIES, image index zero can be the inserted dylib.
+        char mainImage[PATH_MAX];
+        uint32_t pathSize = sizeof(mainImage);
+        BOOL hasExecutablePath = _NSGetExecutablePath(mainImage, &pathSize) == 0;
         fprintf(stdout, "Provider image: %s\nMain image: %s\n",
-                image ?: "(null)", mainImage ?: "(null)");
+                image ?: "(null)", hasExecutablePath ? mainImage : "(unavailable)");
         // dyld and Objective-C may report equivalent paths with different spelling.
         struct stat providerFile, mainFile;
-        check(image && mainImage && stat(image, &providerFile) == 0 && stat(mainImage, &mainFile) == 0
+        check(image && hasExecutablePath && stat(image, &providerFile) == 0 && stat(mainImage, &mainFile) == 0
               && providerFile.st_dev == mainFile.st_dev && providerFile.st_ino == mainFile.st_ino,
               "provider belongs to actual extension executable");
         check(provider && class_getSuperclass(provider) == [QLPreviewProvider class], "QLPreviewProvider superclass");
